@@ -44,8 +44,7 @@ BACKTEST_SYMBOLS = [
     # "XAGUSDT",  # исключён, т.к. истории нет
 ]
 
-
-
+GLOBAL_FEED = None  # временно, объявим тип ниже
 
 # ========= CSV minute feed =========
 
@@ -133,10 +132,76 @@ class CsvMinuteFeed:
 class DummySession:
     """
     Мок-объект вместо реального HTTP-соединения с Bybit.
-    Все методы возвращают успешный пустой результат.
+    Для get_kline отдаём 1H-свечи, агрегированные из CsvMinuteFeed.
+    Остальные методы возвращают пустой успешный результат.
     """
 
+    def get_kline(self, category: str, symbol: str, interval: str,
+                  start: Optional[int] = None, end: Optional[int] = None, limit: int = 200):
+        """
+        Эмуляция /v5/market/kline.
+        interval: "60" для 1H, как в твоём коде.
+        start/end в мс. Возвращаем list, как в Bybit: [startTime, open, high, low, close, volume, turnover].
+        """
+        if GLOBAL_FEED is None:
+            return {"retCode": 0, "retMsg": "OK", "result": {"list": []}}
+
+        if interval != "60":
+            # На всякий случай, если где-то вызывается другой таймфрейм
+            return {"retCode": 0, "retMsg": "OK", "result": {"list": []}}
+
+        df_1m = GLOBAL_FEED.data_1m.get(symbol)
+        if df_1m is None or df_1m.empty:
+            return {"retCode": 0, "retMsg": "OK", "result": {"list": []}}
+
+        df = df_1m.copy()
+
+        # Фильтрация по start/end (они в мс)
+        if start is not None:
+            start_dt = datetime.utcfromtimestamp(start / 1000).replace(tzinfo=df.index.tz)
+            df = df[df.index >= start_dt]
+        if end is not None:
+            end_dt = datetime.utcfromtimestamp(end / 1000).replace(tzinfo=df.index.tz)
+            df = df[df.index <= end_dt]
+
+        if df.empty:
+            return {"retCode": 0, "retMsg": "OK", "result": {"list": []}}
+
+        # Агрегация в 1H: open, high, low, close, volume
+        df_1h = df.resample("1H").agg(
+            {
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "volume": "sum",
+            }
+        ).dropna()
+
+        # Ограничение по limit (Bybit отдаёт последние N свечей)
+        if len(df_1h) > limit:
+            df_1h = df_1h.iloc[-limit:]
+
+        result_list = []
+        for ts, row in df_1h.iterrows():
+            # Bybit startTime в мс
+            start_ms = int(ts.timestamp() * 1000)
+            result_list.append(
+                [
+                    str(start_ms),
+                    f"{row['open']:.6f}",
+                    f"{row['high']:.6f}",
+                    f"{row['low']:.6f}",
+                    f"{row['close']:.6f}",
+                    f"{row['volume']:.6f}",
+                    "0",  # turnover можно не считать
+                ]
+            )
+
+        return {"retCode": 0, "retMsg": "OK", "result": {"list": result_list}}
+
     def __getattr__(self, item):
+        # Остальные методы — глушим, как раньше
         def _dummy(*args, **kwargs):
             logger.debug("DummySession.%s called with %s %s", item, args, kwargs)
             return {"retCode": 0, "retMsg": "OK", "result": {"list": []}}
@@ -200,7 +265,9 @@ sp.count_active_trades = bt_count_active_trades
 # ========= Backtest main loop =========
 
 def run_backtest():
-    feed = CsvMinuteFeed(DATA_DIR, BACKTEST_SYMBOLS)
+    global GLOBAL_FEED
+    GLOBAL_FEED = CsvMinuteFeed(DATA_DIR, BACKTEST_SYMBOLS)
+    feed = GLOBAL_FEED
     logger.info("Starting backtest over %d minutes", len(feed.global_times))
 
     prev_hour: Optional[datetime] = None
