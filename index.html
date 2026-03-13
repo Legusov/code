@@ -1,0 +1,1329 @@
+import math
+import time
+import logging
+from datetime import datetime, UTC, timedelta
+from dataclasses import dataclass, field
+from typing import Optional
+import sqlite3
+import numpy as np
+import pandas as pd
+from pybit.unified_trading import HTTP
+from config import API_KEY, API_SECRET
+from pybit.exceptions import InvalidRequestError
+﻿
+# Логгер
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
+﻿
+# Ограничение по количеству активных сделок
+MAX_ACTIVE_TRADES = 50  # например, не более 10 символов в рынке одновременно
+﻿
+﻿
+session = HTTP(
+    testnet=False,         # боевой аккаунт
+    api_key=API_KEY,
+    api_secret=API_SECRET,
+    timeout=30,
+    demo=True,             # Unified demo, если у тебя включен demo‑режим
+)
+﻿
+DB_PATH = "sym.db"
+﻿
+# Параметры, как в Phonix_BTC
+WEEKDAY_ATR_MULT       = 1.7    # weekday_atr
+WEEKEND_ATR_MULT       = 0.9    # weekend_atr
+TARGET_NOTIONAL        = 10.0   # ~10 USDT позиции (1 USDT маржи при x10)
+LEVERAGE               = "10"
+CATEGORY               = "linear"
+﻿
+TIMEOUT_HOURS          = 24     # timeout_hours
+MAX_HOLD_HOURS         = 120    # max_hold_hours
+TP_ATR_MULT            = 2.34   # tp_atr
+SL_ATR_MULT            = 1.0    # sl_atr
+TIME_EXIT_MINUTES      = 240    # time_exit_bars (480 минут = 8 часов)
+CANCEL_THRESHOLD_ATR   = 1.4    # cancel_threshold_atr
+﻿
+SLOPE_PERIOD       = 24
+ATR_PERIOD         = 14
+VOL_DECAY_SHORT    = 6
+VOL_DECAY_LONG     = 24
+﻿
+LONG_VOL_DECAY_MAX = 1.0
+﻿
+SHORT_VOL_DECAY_MAX= 1.0
+LONG_SLOPE_MAX     = -0.8   # было -0.25
+SHORT_SLOPE_MIN    = 0.8    # было 0.25
+﻿
+#TEST_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "TONUSDT"]
+﻿
+TOP_SYMBOLS = [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "DOGEUSDT",
+    "SUIUSDT",
+    "ADAUSDT",
+    "NEARUSDT",
+    "LINKUSDT",
+    "ENSOUSDT",
+    "BNBUSDT",
+    "ZECUSDT",
+    "AAVEUSDT",
+    "AVAXUSDT",
+    "ICPUSDT",
+    "BCHUSDT",
+    "WLDUSDT",
+    "WIFUSDT",
+    "RENDERUSDT",
+    "DOTUSDT",
+    "LTCUSDT",
+    "GALAUSDT",
+    "FLOWUSDT",
+    "CRVUSDT",
+    "APTUSDT",
+    "XAUTUSDT",
+    "XAGUSDT",
+]
+﻿
+@dataclass
+class TradeState:
+    symbol: str
+    side: str  # "Buy" или "Sell"
+    direction: int  # +1 (лонг) или -1 (шорт) — как в Phonix_BTC
+    status: str  # "pending", "open", "cancelled", "timeout", "closed"
+﻿
+    # Параметры сигнала (1H бар)
+    signal_time: datetime
+    signal_price: float
+    signal_atr: float
+    is_weekend: bool
+﻿
+    # Ордер на вход
+    order_id: Optional[str] = None
+    limit_price: Optional[float] = None
+    max_adverse: float = 0.0
+﻿
+    # Факт входа в позицию
+    entry_time: Optional[datetime] = None
+    entry_price: Optional[float] = None
+    tp_price: Optional[float] = None
+    sl_price: Optional[float] = None
+﻿
+    # Выход
+    exit_time: Optional[datetime] = None
+    exit_price: Optional[float] = None
+    exit_type: Optional[str] = None  # "TP", "SL", "TIME", "MAX_HOLD", "CANCEL", "TIMEOUT"
+﻿
+    # Служебные
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC).replace(tzinfo=None))
+﻿
+﻿
+def build_1h_df_from_klines(klines: list) -> pd.DataFrame:
+    """
+    Принимает list из get_kline (interval='60') и строит df_1h с индексом datetime.
+    klines: list[ [startTime, open, high, low, close, volume, turnover], ... ]
+    """
+    if not klines:
+        return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+﻿
+    records = []
+    for bar in klines:
+        start_ms = int(bar[0])
+        dt = datetime.fromtimestamp(start_ms / 1000, UTC).replace(tzinfo=None)
+        o = float(bar[1])
+        h = float(bar[2])
+        l = float(bar[3])
+        c = float(bar[4])
+        v = float(bar[5])
+        records.append((dt, o, h, l, c, v))
+﻿
+    df = pd.DataFrame(
+        records,
+        columns=["datetime", "open", "high", "low", "close", "volume"],
+    ).set_index("datetime").sort_index()
+﻿
+    return df
+﻿
+def calculate_indicators_df(df_1h: pd.DataFrame):
+    """
+    Полный аналог calculate_indicators из Phonix_BTC, но на уже готовом df_1h.
+    Возвращает slope, vol_decay, atr (numpy-массивы той же длины).
+    """
+    c = df_1h["close"].values
+    h = df_1h["high"].values
+    l = df_1h["low"].values
+    n = len(c)
+﻿
+    # slope
+    slope = np.full(n, np.nan)
+    p = SLOPE_PERIOD
+    if n > p:
+        slope[p:] = (c[p:] - c[:-p]) / c[:-p] * 100.0
+﻿
+    # vol_decay
+    std_short = pd.Series(c).rolling(VOL_DECAY_SHORT).std().values
+    std_long  = pd.Series(c).rolling(VOL_DECAY_LONG).std().values
+    vol_decay = np.where(std_long > 1e-9, std_short / std_long, 1.0)
+﻿
+    # ATR
+    tr = np.zeros(n)
+    if n > 0:
+        tr[0] = h[0] - l[0]
+    if n > 1:
+        prev_close = c[:-1]
+        tr[1:] = np.maximum(
+            h[1:] - l[1:],
+            np.maximum(
+                np.abs(h[1:] - prev_close),
+                np.abs(l[1:] - prev_close),
+            ),
+        )
+    atr = pd.Series(tr).rolling(ATR_PERIOD).mean().values
+﻿
+    return slope, vol_decay, atr
+﻿
+def generate_signals_from_indicators(slope, vol_decay, atr):
+    """
+    Полная копия generate_signals из Phonix_BTC.
+    """
+    n = len(slope)
+    signals = np.zeros(n, dtype=np.int8)
+﻿
+    valid = ~np.isnan(slope) & ~np.isnan(atr) & (atr > 0)
+﻿
+    long_cond = (slope < LONG_SLOPE_MAX) & (vol_decay < LONG_VOL_DECAY_MAX)
+    short_cond = (slope > SHORT_SLOPE_MIN) & (vol_decay < SHORT_VOL_DECAY_MAX)
+﻿
+    signals[valid & long_cond & ~short_cond] = 1
+    signals[valid & short_cond & ~long_cond] = -1
+﻿
+    return signals
+﻿
+def get_last_closed_hour_signal(session: HTTP, symbol: str):
+    """
+    Строит df_1h из get_kline, считает индикаторы и сигнал на последнем ЗАКРЫТОМ баре.
+    Возвращает (signal, signal_price, signal_atr, signal_time) или (0, None, None, None),
+    если торговать нельзя.
+    """
+    klines = get_1h_klines(session, symbol)
+    if not klines:
+        return 0, None, None, None
+﻿
+    df_1h = build_1h_df_from_klines(klines)
+    if len(df_1h) < max(SLOPE_PERIOD, ATR_PERIOD, VOL_DECAY_LONG) + 1:
+        # мало истории для индикаторов
+        return 0, None, None, None
+﻿
+    # отбрасываем потенциально незакрытый последний бар:
+    now_utc = datetime.now(UTC).replace(tzinfo=None)
+    # время закрытия бара = start + 60 минут
+    closes_mask = [(idx + timedelta(hours=1) <= now_utc) for idx in df_1h.index]
+    df_closed = df_1h.loc[closes_mask]
+    if len(df_closed) < max(SLOPE_PERIOD, ATR_PERIOD, VOL_DECAY_LONG) + 1:
+        return 0, None, None, None
+﻿
+    slope, vol_decay, atr = calculate_indicators_df(df_closed)
+    signals = generate_signals_from_indicators(slope, vol_decay, atr)
+﻿
+    # сигнал на последнем закрытом баре
+    last_idx = len(df_closed) - 1
+    last_signal = int(signals[last_idx])
+    if last_signal == 0:
+        return 0, None, None, None
+﻿
+    signal_price = float(df_closed["close"].iloc[last_idx])
+    signal_atr   = float(atr[last_idx])
+    signal_time  = df_closed.index[last_idx]
+﻿
+    return last_signal, signal_price, signal_atr, signal_time
+﻿
+def process_symbol_1h_signal(session: HTTP, symbol: str):
+    """
+    Проверяет, есть ли активная сделка по symbol. Если нет — считает сигнал на 1H
+    и при необходимости открывает новую сделку через init_trade_state_from_signal.
+    """
+    # уже есть открытая или ожидающая сделка — новых не создаём
+    active_trade, active_id = load_active_trade(symbol)
+    if active_trade is not None:
+        return
+﻿
+    # проверка глобального лимита сделок
+    total_active = count_active_trades()
+    if total_active >= MAX_ACTIVE_TRADES:
+        logger.info(
+            "SKIP new entry on %s: active_trades=%d >= MAX_ACTIVE_TRADES=%d",
+            symbol, total_active, MAX_ACTIVE_TRADES
+        )
+        return
+﻿
+    signal, signal_price, signal_atr, signal_time = get_last_closed_hour_signal(session, symbol)
+    if signal == 0:
+        return
+﻿
+    logger.info(
+        "NEW SIGNAL on %s: direction=%d, price=%.6f, atr=%.6f, time=%s",
+        symbol, signal, signal_price, signal_atr, signal_time.isoformat()
+    )
+﻿
+    trade = init_trade_state_from_signal(
+        session=session,
+        symbol=symbol,
+        direction=signal,
+        signal_price=signal_price,
+        signal_atr=signal_atr,
+        signal_time=signal_time,
+    )
+﻿
+    if trade is None:
+        logger.warning("Trade init returned None for %s, probably order was not accepted.", symbol)
+        return
+﻿
+    save_trade_state(trade, trade_id=None)
+﻿
+def get_1h_klines(session: HTTP, symbol: str, limit: int = 500, category: str = CATEGORY):
+    """
+    Возвращает список 1H-клайнов (interval='60') по symbol, отсортированных по времени.
+    """
+    resp = session.get_kline(
+        category=category,
+        symbol=symbol,
+        interval="60",
+        limit=limit,
+    )
+    klist = resp["result"]["list"]
+    if not klist:
+        return []
+﻿
+    # Bybit возвращает в порядке от новых к старым, разворачиваем
+    klist_sorted = sorted(klist, key=lambda x: int(x[0]))
+    return klist_sorted
+﻿
+def ensure_leverage_10x(session: HTTP, symbol: str, category: str = CATEGORY):
+    """
+    Устанавливает плечо 10x по символу (buy/sell одинаковое).
+    Игнорирует ошибку 110043 (leverage not modified), т.к. это значит, что уже 10x.
+    """
+    try:
+        resp = session.set_leverage(
+            category=category,
+            symbol=symbol,
+            buyLeverage=LEVERAGE,
+            sellLeverage=LEVERAGE,
+        )
+        return resp
+    except InvalidRequestError as e:
+        msg = str(e)
+        if "110043" in msg or "leverage not modified" in msg:
+            logger.info("Leverage already 10x for %s, skipping set_leverage", symbol)
+            return None
+        # остальные ошибки — пробрасываем дальше
+        raise
+﻿
+def calc_qty_for_notional(price: float, target_notional: float = TARGET_NOTIONAL) -> float:
+    """
+    Для линейного контракта (USDT‑маржин): notional = qty * price.
+    Возвращаем qty для указанного номинала (по умолчанию ~10 USDT).
+    """
+    if price <= 0:
+        raise ValueError("price must be > 0")
+    return target_notional / price
+﻿
+def round_to_step(value: float, step: float) -> float:
+    return math.floor(value / step) * step
+﻿
+def get_last_price(session: HTTP, symbol: str, category: str = CATEGORY) -> float:
+    resp = session.get_tickers(category=category, symbol=symbol)
+    last_price = float(resp["result"]["list"][0]["lastPrice"])
+    return last_price
+﻿
+def format_step(value: float, step: float) -> str:
+    """
+    Форматирует число value с количеством знаков после запятой,
+    соответствующим step (например, step=0.01 -> 2 знака).
+    """
+    step_str = f"{step:.16f}".rstrip("0")
+    if "." in step_str:
+        decimals = len(step_str.split(".")[1])
+    else:
+        decimals = 0
+    fmt = f"{{:.{decimals}f}}"
+    return fmt.format(value)
+﻿
+def get_instrument_filters(session: HTTP, symbol: str, category: str = CATEGORY):
+    resp = session.get_instruments_info(category=category, symbol=symbol)
+    info = resp["result"]["list"][0]
+﻿
+    tick_size = float(info["priceFilter"]["tickSize"])
+    lot = info["lotSizeFilter"]
+    qty_step = float(lot["qtyStep"])
+    min_order_qty = float(lot.get("minOrderQty", qty_step))  # запасной вариант
+﻿
+    return tick_size, qty_step, min_order_qty
+﻿
+def place_tp_sl_orders(session: HTTP, trade: "TradeState"):
+    """
+    Ставит TP/SL на открытую позицию через /v5/position/trading-stop.
+    Режим: tpslMode="Full", оба ордера рыночные (меньше параметров и ошибок).
+    """
+    # 1) Проверяем, что позиция действительно есть
+    resp_pos = session.get_positions(category=CATEGORY, symbol=trade.symbol)
+    pos_list = resp_pos["result"]["list"]
+    if not pos_list:
+        logger.warning("No position found on exchange for %s when placing TP/SL", trade.symbol)
+        return
+﻿
+    pos = pos_list[0]
+    size = float(pos["size"])
+    if size <= 0:
+        logger.warning("Position size <= 0 for %s when placing TP/SL", trade.symbol)
+        return
+﻿
+    # 2) Фильтры инструмента, чтобы красиво отформатировать цены
+    tick_size, qty_step, _ = get_instrument_filters(session, trade.symbol, CATEGORY)
+﻿
+    tp_str = format_step(trade.tp_price, tick_size)
+    sl_str = format_step(trade.sl_price, tick_size)
+﻿
+    logger.info(
+        "Placing TP/SL via trading-stop for %s: tp=%s, sl=%s, size=%s",
+        trade.symbol, tp_str, sl_str, size
+    )
+﻿
+    # 3) Вызываем v5/position/trading-stop
+    # tpslMode="Full" => TP/SL на всю позицию, оба market, tp/slOrderType указывать не нужно[web:116]
+    try:
+        resp = session.set_trading_stop(
+            category=CATEGORY,
+            symbol=trade.symbol,
+            tpslMode="Full",
+            takeProfit=tp_str,
+            stopLoss=sl_str,
+            tpTriggerBy="LastPrice",
+            slTriggerBy="LastPrice",
+            positionIdx=0,
+        )
+        logger.info("trading-stop response for %s: %s", trade.symbol, resp.get("retMsg"))
+    except InvalidRequestError as e:
+        logger.exception("Failed to set trading-stop TP/SL for %s: %s", trade.symbol, e)
+﻿
+def is_weekend(ts: datetime) -> bool:
+    # Monday=0 ... Sunday=6
+    return ts.weekday() >= 5
+﻿
+def calc_limit_price_pullback(
+    side: str,
+    signal_price: float,
+    signal_atr: float,
+    signal_time: datetime,
+    weekday_mult: float = WEEKDAY_ATR_MULT,
+    weekend_mult: float = WEEKEND_ATR_MULT,
+) -> float:
+    """
+    Считает лимитную цену входа по ATR‑откату:
+    - для лонга: сигнал - ATR * mult
+    - для шорта: сигнал + ATR * mult
+    mult зависит от будней/выходных.
+    """
+    if signal_atr <= 0:
+        raise ValueError("signal_atr must be > 0")
+﻿
+    entry_mult = weekend_mult if is_weekend(signal_time) else weekday_mult
+﻿
+    if side == "Buy":   # long
+        limit_price = signal_price - signal_atr * entry_mult
+    elif side == "Sell":  # short
+        limit_price = signal_price + signal_atr * entry_mult
+    else:
+        raise ValueError("side must be 'Buy' or 'Sell'")
+﻿
+    return limit_price
+﻿
+from pybit.exceptions import InvalidRequestError
+﻿
+from pybit.exceptions import InvalidRequestError
+﻿
+MIN_NOTIONAL_USDT = 5.0   # минимум Bybit на линейных контрактах
+﻿
+def open_limit_pullback_10x(
+    session: HTTP,
+    symbol: str,
+    side: str,               # "Buy" или "Sell"
+    signal_price: float,
+    signal_atr: float,
+    signal_time: datetime,
+    category: str = CATEGORY,
+    target_notional: float = TARGET_NOTIONAL,
+):
+    """
+    Ставит лимитный ордер на откате по ATR с плечом 10x и
+    номиналом ~target_notional USDT (маржа ~target_notional/10).
+    При ошибке 'estimated will trigger liq' уменьшает размер и пробует снова.
+    При ошибке 'min order value 5USDT' прекращает попытки по символу.
+    """
+    # 1) Плечо 10х
+    ensure_leverage_10x(session, symbol, category)
+﻿
+    # 2) Посчитать лимитную цену по ATR‑откату
+    raw_limit_price = calc_limit_price_pullback(
+        side=side,
+        signal_price=signal_price,
+        signal_atr=signal_atr,
+        signal_time=signal_time,
+    )
+﻿
+    # 3) Получить фильтры инструмента
+    tick_size, qty_step, min_order_qty = get_instrument_filters(session, symbol, category)
+﻿
+    limit_price = round_to_step(raw_limit_price, tick_size)
+﻿
+    # Базовый notional, который будем уменьшать при необходимости,
+    # но не опускаясь ниже MIN_NOTIONAL_USDT
+    cur_notional = max(float(target_notional), MIN_NOTIONAL_USDT)
+﻿
+    max_retries = 4
+    attempt = 0
+﻿
+    last_error_resp = None
+﻿
+    while attempt < max_retries:
+        attempt += 1
+﻿
+        # Пересчитать количество под текущий notional
+        raw_qty = calc_qty_for_notional(limit_price, target_notional=cur_notional)
+        qty = round_to_step(raw_qty, qty_step)
+        if qty < min_order_qty:
+            qty = min_order_qty
+﻿
+        if qty <= 0:
+            logger.error(
+                "Calculated qty <= 0 for %s at attempt %d (notional=%.4f). "
+                "Stopping attempts.",
+                symbol, attempt, cur_notional
+            )
+            break
+﻿
+        price_str = format_step(limit_price, tick_size)
+        qty_str = format_step(qty, qty_step)
+        approx_notional = float(price_str) * float(qty_str)
+﻿
+        logger.info(
+            "Placing LIMIT %s on %s (attempt %d/%d): limit_price=%s, qty=%s, "
+            "atr=%.6f, signal_price=%.6f, notional≈%.4f",
+            side, symbol, attempt, max_retries,
+            price_str, qty_str, signal_atr, signal_price,
+            approx_notional
+        )
+﻿
+        try:
+            resp = session.place_order(
+                category=category,
+                symbol=symbol,
+                side=side,
+                orderType="Limit",
+                qty=qty_str,
+                price=price_str,
+                timeInForce="PostOnly",
+                reduceOnly=False,
+                positionIdx=0,
+            )
+        except InvalidRequestError as e:
+            msg = str(e)
+            last_error_resp = msg
+﻿
+            # 1) Риск-ошибка ликвидации
+            if "estimated will trigger liq" in msg or "trigger liq" in msg:
+                logger.warning(
+                    "Order for %s rejected as 'estimated will trigger liq' "
+                    "(qty=%s, notional≈%.4f). Reducing notional and retrying...",
+                    symbol, qty_str, approx_notional
+                )
+                # Уменьшаем целевой notional, но не ниже MIN_NOTIONAL_USDT
+                new_notional = cur_notional * 0.5
+                if new_notional < MIN_NOTIONAL_USDT:
+                    logger.error(
+                        "Notional for %s would fall below MIN_NOTIONAL_USDT (%.4f < %.4f). "
+                        "Stopping attempts.",
+                        symbol, new_notional, MIN_NOTIONAL_USDT
+                    )
+                    break
+                cur_notional = new_notional
+                continue
+﻿
+            # 2) Минимальный notional Bybit (5 USDT)
+            if "minimum order value 5USDT" in msg or "110094" in msg:
+                logger.error(
+                    "Order for %s rejected: minimum order value 5USDT. "
+                    "Cannot reduce further. Stopping attempts.",
+                    symbol
+                )
+                break
+﻿
+            # 3) Любая другая InvalidRequestError — пробрасываем
+            logger.error("InvalidRequestError for %s: %s", symbol, msg)
+            raise
+﻿
+        # Если сюда дошли без исключения — значит, ордер приняли
+        try:
+            order_id = resp["result"]["orderId"]
+        except Exception:
+            order_id = None
+﻿
+        logger.info(
+            "Limit order placed on %s: side=%s, order_id=%s, status=%s",
+            symbol, side, order_id, resp.get("retMsg")
+        )
+        return resp, limit_price
+﻿
+    logger.error(
+        "Failed to place limit order on %s after %d attempts. Last error: %s",
+        symbol, max_retries, last_error_resp
+    )
+    return None, None
+﻿
+def init_trade_state_from_signal(
+        session: HTTP,
+        symbol: str,
+        direction: int,  # +1 или -1
+        signal_price: float,
+        signal_atr: float,
+        signal_time: datetime,
+) -> Optional[TradeState]:
+    """
+    Создаёт TradeState и ставит лимитный ордер на откате по ATR.
+    Возвращает заполненный TradeState с order_id и limit_price или None.
+    """
+    side = "Buy" if direction == 1 else "Sell"
+﻿
+    resp, limit_price = open_limit_pullback_10x(
+        session=session,
+        symbol=symbol,
+        side=side,
+        signal_price=signal_price,
+        signal_atr=signal_atr,
+        signal_time=signal_time,
+        category=CATEGORY,
+        target_notional=TARGET_NOTIONAL,
+    )
+﻿
+    # Если ордер не удалось поставить (liq/min_notional/другая ошибка) — выходим без трейда
+    if resp is None:
+        logger.error(
+            "Failed to open initial limit order for %s, skipping trade init.",
+            symbol
+        )
+        return None
+﻿
+    try:
+        order_id = resp["result"]["orderId"]
+    except Exception:
+        order_id = None
+﻿
+    if not order_id:
+        logger.error(
+            "No orderId returned for %s in init_trade_state_from_signal, skipping trade.",
+            symbol
+        )
+        return None
+﻿
+    # Можно вычислить, выходной ли это день, если у тебя есть такая утилита.
+    # Если нет — поставим False.
+    is_weekend = signal_time.weekday() >= 5
+﻿
+    trade = TradeState(
+        symbol=symbol,
+        side=side,
+        direction=direction,
+        status="pending",          # см. твой датакласс: нижний регистр
+        signal_time=signal_time,
+        signal_price=signal_price,
+        signal_atr=signal_atr,
+        is_weekend=is_weekend,
+        order_id=order_id,
+        limit_price=float(limit_price),
+        max_adverse=0.0,
+        entry_time=None,
+        entry_price=None,
+        tp_price=None,
+        sl_price=None,
+        exit_time=None,
+        exit_price=None,
+        exit_type=None,
+    )
+    return trade
+﻿
+def update_trade_state_with_1m_bar(
+        session: HTTP,
+        trade: TradeState,
+        bar_time: datetime,
+        bar_open: float,
+        bar_high: float,
+        bar_low: float,
+        bar_close: float,
+) -> TradeState:
+    """
+    Обновляет состояние сделки на основании нового 1‑минутного бара.
+    Логика максимально близка к execute_trade из Phonix_BTC.
+    """
+    trade.updated_at = datetime.now(UTC).replace(tzinfo=None)
+﻿
+    # Если сделка уже завершена — ничего не делаем
+    if trade.status in ("cancelled", "timeout", "closed"):
+        return trade
+﻿
+    # --------------------------
+    # 1. Фаза до входа (pending)
+    # --------------------------
+    if trade.status == "pending" and trade.entry_price is None:
+        # 1.1. Неблагоприятное движение в ATR
+        if trade.signal_atr > 0:
+            if trade.direction == 1:  # лонг
+                adverse = (trade.signal_price - bar_low) / trade.signal_atr
+            else:  # шорт
+                adverse = (bar_high - trade.signal_price) / trade.signal_atr
+            trade.max_adverse = max(trade.max_adverse, adverse)
+﻿
+        # Отмена по cancel_threshold_atr
+        if trade.max_adverse >= CANCEL_THRESHOLD_ATR:
+            # Пытаемся отменить ордер
+            position_already_opened = False
+            if trade.order_id:
+                try:
+                    session.cancel_order(
+                        category=CATEGORY,
+                        symbol=trade.symbol,
+                        orderId=trade.order_id,
+                    )
+                except InvalidRequestError as e:
+                    msg = str(e)
+                    if "110001" in msg or "order not exists" in msg:
+                        # Ордер уже нет — проверяем, не открылась ли позиция
+                        try:
+                            pos_resp = session.get_positions(category=CATEGORY, symbol=trade.symbol)
+                            pos_list = pos_resp["result"]["list"]
+                            if pos_list and float(pos_list[0]["size"]) > 0:
+                                position_already_opened = True
+                                logger.warning(
+                                    "Pending trade on %s: order gone (110001), but position exists. "
+                                    "Treating as filled.",
+                                    trade.symbol
+                                )
+                            else:
+                                logger.warning(
+                                    "Cancel_order ignored for %s: order already gone (110001) and no position",
+                                    trade.symbol
+                                )
+                        except Exception as e2:
+                            logger.exception(
+                                "Failed to check positions after 110001 for %s: %s",
+                                trade.symbol, e2
+                            )
+                    else:
+                        logger.exception(
+                            "Failed to cancel order for %s: %s", trade.symbol, e
+                        )
+﻿
+            if position_already_opened:
+                # считаем, что вход состоялся по рынку/лимиту, но мы его проспали
+                now_ts = bar_time
+                trade.entry_time = trade.entry_time or now_ts
+                # если entry_price ещё None — используем текущий бар_close
+                trade.entry_price = trade.entry_price or bar_close
+                trade.status = "open"
+﻿
+                if trade.direction == 1:
+                    trade.tp_price = trade.entry_price + trade.signal_atr * TP_ATR_MULT
+                    trade.sl_price = trade.entry_price - trade.signal_atr * SL_ATR_MULT
+                else:
+                    trade.tp_price = trade.entry_price - trade.signal_atr * TP_ATR_MULT
+                    trade.sl_price = trade.entry_price + trade.signal_atr * SL_ATR_MULT
+﻿
+                logger.info(
+                    "ENTRY (recovered) on %s after 110001: side=%s, entry_price=%.6f, time=%s",
+                    trade.symbol, trade.side, trade.entry_price, now_ts.isoformat()
+                )
+﻿
+                # ставим реальные TP/SL на бирже для восстановленной позиции
+                place_tp_sl_orders(session, trade)
+                return trade
+            else:
+                # обычный сценарий: сделки нет, ордер отменён
+                trade.status = "cancelled"
+                trade.exit_type = "CANCEL"
+                trade.exit_time = bar_time
+                logger.info(
+                    "ORDER CANCELLED on %s by adverse move: max_adverse=%.3f ATR, time=%s",
+                    trade.symbol, trade.max_adverse, bar_time.isoformat()
+                )
+                return trade
+﻿
+        # Отмена по TIMEOUT_HOURS
+        minutes_since_signal = (bar_time - trade.signal_time).total_seconds() / 60.0
+        if minutes_since_signal >= TIMEOUT_HOURS * 60:
+            trade.status = "timeout"
+            trade.exit_type = "TIMEOUT"
+            trade.exit_time = bar_time
+            logger.info(
+                "ORDER TIMEOUT on %s: minutes_since_signal=%.1f, time=%s",
+                trade.symbol, minutes_since_signal, bar_time.isoformat()
+            )
+            if trade.order_id:
+                try:
+                    session.cancel_order(
+                        category=CATEGORY,
+                        symbol=trade.symbol,
+                        orderId=trade.order_id,
+                    )
+                except InvalidRequestError as e:
+                    msg = str(e)
+                    if "110001" in msg or "order not exists" in msg:
+                        logger.warning(
+                            "Cancel_order ignored for %s: order already gone (110001)",
+                            trade.symbol
+                        )
+                    else:
+                        logger.exception(
+                            "Failed to cancel order for %s: %s", trade.symbol, e
+                        )
+            return trade
+﻿
+        # 1.2. Проверка, исполнился ли лимитник
+        # В БОЕВЫХ УСЛОВИЯХ ЛУЧШЕ СПРАШИВАТЬ status ОРДЕРА ЧЕРЕЗ get_open_orders/order history[web:32][web:34].
+        #
+        # Здесь, чтобы быть ближе к бэктесту, используем high/low бара.
+        filled = False
+        entry_price = None
+﻿
+        if trade.direction == 1:  # лонг
+            # Если открылись ниже лимита — считаем вход по open, иначе по limit
+            if bar_open <= trade.limit_price:
+                entry_price = bar_open  # можно добавить slippage, если нужно
+                filled = True
+            elif bar_low <= trade.limit_price:
+                entry_price = trade.limit_price
+                filled = True
+        else:  # шорт
+            if bar_open >= trade.limit_price:
+                entry_price = bar_open
+                filled = True
+            elif bar_high >= trade.limit_price:
+                entry_price = trade.limit_price
+                filled = True
+﻿
+        if filled and entry_price is not None:
+            trade.entry_price = entry_price
+            trade.entry_time = bar_time
+            trade.status = "open"
+﻿
+            if trade.direction == 1:
+                trade.tp_price = trade.entry_price + trade.signal_atr * TP_ATR_MULT
+                trade.sl_price = trade.entry_price - trade.signal_atr * SL_ATR_MULT
+            else:
+                trade.tp_price = trade.entry_price - trade.signal_atr * TP_ATR_MULT
+                trade.sl_price = trade.entry_price + trade.signal_atr * SL_ATR_MULT
+﻿
+            logger.info(
+                "ENTRY filled on %s: side=%s, price=%.6f, limit_price=%.6f, time=%s",
+                trade.symbol, trade.side, entry_price, trade.limit_price, bar_time.isoformat()
+            )
+﻿
+            # Новый шаг: сразу ставим реальные TP/SL на бирже
+            place_tp_sl_orders(session, trade)
+﻿
+            return trade
+﻿
+    # --------------------------
+    # 2. Фаза после входа (open)
+    # --------------------------
+    if trade.status == "open" and trade.entry_price is not None:
+        # Сколько минут в позиции
+        minutes_in_pos = (bar_time - trade.entry_time).total_seconds() / 60.0
+﻿
+        # 2.1. Выход по MAX_HOLD_HOURS
+        if minutes_in_pos >= MAX_HOLD_HOURS * 60:
+            trade.status = "closed"
+            trade.exit_type = "MAX_HOLD"
+            trade.exit_time = bar_time
+            trade.exit_price = bar_close
+            logger.info(
+                "EXIT MAX_HOLD on %s: side=%s, entry_price=%.6f, exit_price=%.6f, minutes_in_pos=%.1f",
+                trade.symbol, trade.side, trade.entry_price, bar_close, minutes_in_pos
+            )
+            return trade
+﻿
+        # 2.2. Проверка SL/TP внутри бара
+        exit_price = None
+        exit_type = None
+﻿
+        if trade.direction == 1:  # лонг
+            sl_hit = bar_low <= trade.sl_price
+            tp_hit = bar_high >= trade.tp_price
+            if sl_hit and tp_hit:
+                exit_price = trade.sl_price
+                exit_type = "SL"
+            elif sl_hit:
+                exit_price = trade.sl_price
+                exit_type = "SL"
+            elif tp_hit:
+                exit_price = trade.tp_price
+                exit_type = "TP"
+        else:  # шорт
+            sl_hit = bar_high >= trade.sl_price
+            tp_hit = bar_low <= trade.tp_price
+            if sl_hit and tp_hit:
+                exit_price = trade.sl_price
+                exit_type = "SL"
+            elif sl_hit:
+                exit_price = trade.sl_price
+                exit_type = "SL"
+            elif tp_hit:
+                exit_price = trade.tp_price
+                exit_type = "TP"
+﻿
+        # 2.3. Выход по времени удержания (time_exit_bars)
+        if exit_price is None and minutes_in_pos >= TIME_EXIT_MINUTES:
+            exit_price = bar_close
+            exit_type = "TIME"
+﻿
+        if exit_price is not None:
+            trade.status = "closed"
+            trade.exit_type = exit_type
+            trade.exit_time = bar_time
+            trade.exit_price = exit_price
+﻿
+            logger.info(
+                "EXIT %s on %s: side=%s, entry_price=%.6f, exit_price=%.6f, time=%s",
+                exit_type, trade.symbol, trade.side, trade.entry_price, exit_price, bar_time.isoformat()
+            )
+﻿
+            # Страховочный маркет-ордер на закрытие
+            close_side = "Buy" if trade.direction == -1 else "Sell"
+            try:
+                # Получаем текущий размер позиции
+                pos_resp = session.get_positions(category=CATEGORY, symbol=trade.symbol)
+                pos_list = pos_resp["result"]["list"]
+                if pos_list:
+                    size = float(pos_list[0]["size"])
+                    if size > 0:
+                        # Берём шаг количества, чтобы красиво отформатировать
+                        _, qty_step, _ = get_instrument_filters(session, trade.symbol, CATEGORY)
+                        qty_str = format_step(size, qty_step)
+﻿
+                        session.place_order(
+                            category=CATEGORY,
+                            symbol=trade.symbol,
+                            side=close_side,
+                            orderType="Market",
+                            qty=qty_str,
+                            reduceOnly=True,
+                            positionIdx=0,
+                        )
+            except Exception as e:
+                logger.exception("Failed to close position on %s at exit: %s", trade.symbol, e)
+﻿
+            return trade
+﻿
+    return trade
+﻿
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS trade_states (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol TEXT NOT NULL,
+        side TEXT NOT NULL,
+        direction INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        signal_time TEXT NOT NULL,
+        signal_price REAL NOT NULL,
+        signal_atr REAL NOT NULL,
+        is_weekend INTEGER NOT NULL,
+        order_id TEXT,
+        limit_price REAL,
+        max_adverse REAL,
+        entry_time TEXT,
+        entry_price REAL,
+        tp_price REAL,
+        sl_price REAL,
+        exit_time TEXT,
+        exit_price REAL,
+        exit_type TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """)
+    conn.commit()
+    conn.close()
+﻿
+def save_trade_state(trade: TradeState, trade_id: int | None = None) -> int:
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+﻿
+    data = (
+        trade.symbol,
+        trade.side,
+        trade.direction,
+        trade.status,
+        trade.signal_time.isoformat(),
+        trade.signal_price,
+        trade.signal_atr,
+        1 if trade.is_weekend else 0,
+        trade.order_id,
+        trade.limit_price,
+        trade.max_adverse,
+        trade.entry_time.isoformat() if trade.entry_time else None,
+        trade.entry_price,
+        trade.tp_price,
+        trade.sl_price,
+        trade.exit_time.isoformat() if trade.exit_time else None,
+        trade.exit_price,
+        trade.exit_type,
+        trade.created_at.isoformat(),
+        trade.updated_at.isoformat(),
+    )
+﻿
+    if trade_id is None:
+        cur.execute("""
+            INSERT INTO trade_states (
+                symbol, side, direction, status,
+                signal_time, signal_price, signal_atr, is_weekend,
+                order_id, limit_price, max_adverse,
+                entry_time, entry_price, tp_price, sl_price,
+                exit_time, exit_price, exit_type,
+                created_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, data)
+        trade_id = cur.lastrowid
+    else:
+        cur.execute("""
+            UPDATE trade_states SET
+                symbol=?, side=?, direction=?, status=?,
+                signal_time=?, signal_price=?, signal_atr=?, is_weekend=?,
+                order_id=?, limit_price=?, max_adverse=?,
+                entry_time=?, entry_price=?, tp_price=?, sl_price=?,
+                exit_time=?, exit_price=?, exit_type=?,
+                created_at=?, updated_at=?
+            WHERE id=?
+        """, data + (trade_id,))
+﻿
+    conn.commit()
+    conn.close()
+    return trade_id
+﻿
+def row_to_trade_state(row) -> TradeState:
+    """
+    Преобразует строку из БД в TradeState.
+    Порядок колонок должен совпадать с CREATE TABLE.
+    """
+    (
+        _id,
+        symbol,
+        side,
+        direction,
+        status,
+        signal_time,
+        signal_price,
+        signal_atr,
+        is_weekend,
+        order_id,
+        limit_price,
+        max_adverse,
+        entry_time,
+        entry_price,
+        tp_price,
+        sl_price,
+        exit_time,
+        exit_price,
+        exit_type,
+        created_at,
+        updated_at,
+    ) = row
+﻿
+    return TradeState(
+        symbol=symbol,
+        side=side,
+        direction=direction,
+        status=status,
+        signal_time=datetime.fromisoformat(signal_time),
+        signal_price=signal_price,
+        signal_atr=signal_atr,
+        is_weekend=bool(is_weekend),
+        order_id=order_id,
+        limit_price=limit_price,
+        max_adverse=max_adverse or 0.0,
+        entry_time=datetime.fromisoformat(entry_time) if entry_time else None,
+        entry_price=entry_price,
+        tp_price=tp_price,
+        sl_price=sl_price,
+        exit_time=datetime.fromisoformat(exit_time) if exit_time else None,
+        exit_price=exit_price,
+        exit_type=exit_type,
+        created_at=datetime.fromisoformat(created_at),
+        updated_at=datetime.fromisoformat(updated_at),
+    )
+﻿
+def load_active_trade(symbol: str) -> tuple[Optional[TradeState], Optional[int]]:
+    """
+    Загружает последнюю активную сделку по символу (pending/open).
+    Возвращает (TradeState | None, trade_id | None).
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT *
+        FROM trade_states
+        WHERE symbol = ?
+          AND status IN ('pending', 'open')
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (symbol,),
+    )
+    row = cur.fetchone()
+    conn.close()
+﻿
+    if row is None:
+        return None, None
+﻿
+    trade_id = row[0]   # id
+    trade = row_to_trade_state(row)
+    return trade, trade_id
+﻿
+def count_active_trades() -> int:
+    """
+    Считает количество активных сделок (pending/open) по всем символам.
+    У нас по каждому символу максимум одна активная, так что это же = числу символов в рынке.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM trade_states
+        WHERE status IN ('pending', 'open')
+        """
+    )
+    (cnt,) = cur.fetchone()
+    conn.close()
+    return int(cnt)
+﻿
+def load_symbols_from_db(db_path: str = DB_PATH) -> list[str]:
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute("SELECT symbol FROM symbols")
+    symbols = [row[0] for row in cur.fetchall()]
+    conn.close()
+    return symbols
+﻿
+def get_last_1m_bar(session: HTTP, symbol: str, category: str = CATEGORY):
+    """
+    Возвращает (bar_time, open, high, low, close) последней 1‑минутной свечи.
+    """
+    resp = session.get_kline(
+        category=category,
+        symbol=symbol,
+        interval="1",
+        limit=1,
+    )
+    klist = resp["result"]["list"]
+    if not klist:
+        return None
+﻿
+    # list[0]: [startTime, openPrice, highPrice, lowPrice, closePrice, volume, turnover]
+    bar = klist[0]
+    start_ms = int(bar[0])
+    bar_time = datetime.fromtimestamp(start_ms / 1000, UTC).replace(tzinfo=None)
+﻿
+    bar_open = float(bar[1])
+    bar_high = float(bar[2])
+    bar_low  = float(bar[3])
+    bar_close = float(bar[4])
+﻿
+    return bar_time, bar_open, bar_high, bar_low, bar_close
+﻿
+def process_symbol_1m_bar(session: HTTP, symbol: str):
+    bar = get_last_1m_bar(session, symbol)
+    if bar is None:
+        return
+﻿
+    bar_time, bar_open, bar_high, bar_low, bar_close = bar
+﻿
+    trade, trade_id = load_active_trade(symbol)
+    if trade is None:
+        # по символу сейчас нет активной сделки — ничего не делаем
+        return
+﻿
+    updated = update_trade_state_with_1m_bar(
+        session=session,
+        trade=trade,
+        bar_time=bar_time,
+        bar_open=bar_open,
+        bar_high=bar_high,
+        bar_low=bar_low,
+        bar_close=bar_close,
+    )
+﻿
+    save_trade_state(updated, trade_id=trade_id)
+﻿
+def main_loop():
+    init_db()
+    #symbols_all = load_symbols_from_db()
+    symbols = [s for s in TOP_SYMBOLS]
+    #symbols = [s for s in symbols_all if s in TEST_SYMBOLS]
+﻿
+    logger.info("Loaded %d symbols from DB (filtered): %s", len(symbols), ", ".join(symbols))
+﻿
+    # Синхронизируем уже открытые позиции на бирже с БД
+    sync_positions_with_db(session)
+﻿
+    now = datetime.now(UTC).replace(tzinfo=None)
+    # первый запуск сигналов почти сразу после старта
+    next_signal_run = now + timedelta(seconds=5)
+﻿
+    while True:
+        now = datetime.now(UTC).replace(tzinfo=None)
+﻿
+        # 1) обновление 1‑минутных баров
+        for symbol in symbols:
+            try:
+                process_symbol_1m_bar(session, symbol)
+            except Exception as e:
+                logger.exception("Error in process_symbol_1m_bar for %s: %s", symbol, e)
+﻿
+        # 2) генерация сигналов каждые 5 минут
+        if now >= next_signal_run:
+            logger.info("Running 1H-based signal generation at %s", now.isoformat())
+            for symbol in symbols:
+                try:
+                    process_symbol_1h_signal(session, symbol)
+                except Exception as e:
+                    logger.exception("Error in process_symbol_1h_signal for %s: %s", symbol, e)
+            next_signal_run = now + timedelta(minutes=5)
+﻿
+        time.sleep(5)
+﻿
+    # now = datetime.now(UTC).replace(tzinfo=None)
+    # next_signal_run = (now.replace(minute=0, second=5, microsecond=0) + timedelta(hours=1))
+    #
+    # while True:
+    #     now = datetime.now(UTC).replace(tzinfo=None)
+    #
+    #     # 1) обновление 1‑минутных баров
+    #     for symbol in symbols:
+    #         try:
+    #             process_symbol_1m_bar(session, symbol)
+    #         except Exception as e:
+    #             logger.exception("Error in process_symbol_1m_bar for %s: %s", symbol, e)
+    #
+    #     # 2) раз в час генерация сигналов
+    #     if now >= next_signal_run:
+    #         logger.info("Running hourly signal generation at %s", now.isoformat())
+    #         for symbol in symbols:
+    #             try:
+    #                 process_symbol_1h_signal(session, symbol)
+    #             except Exception as e:
+    #                 logger.exception("Error in process_symbol_1h_signal for %s: %s", symbol, e)
+    #         next_signal_run = next_signal_run + timedelta(hours=1)
+    #
+    #     time.sleep(5)
+﻿
+def sync_positions_with_db(session: HTTP):
+    """
+    Синхронизирует открытые позиции на бирже с локальной БД.
+    Для каждой позиции size>0 убеждаемся, что есть TradeState со статусом 'open'.
+    Если нет — создаём новый TradeState.
+    """
+    try:
+        resp = session.get_positions(
+            category=CATEGORY,
+            settleCoin="USDT",  # ключевое исправление
+        )
+    except Exception as e:
+        logger.exception("Failed to sync positions: %s", e)
+        return
+﻿
+    pos_list = resp.get("result", {}).get("list", [])
+    if not pos_list:
+        logger.info("No positions to sync from exchange")
+        return
+﻿
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+﻿
+    for pos in pos_list:
+        symbol = pos["symbol"]
+        size = float(pos["size"])
+        if size <= 0:
+            continue
+﻿
+        cur.execute(
+            """
+            SELECT *
+            FROM trade_states
+            WHERE symbol = ?
+              AND status IN ('pending', 'open')
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (symbol,),
+        )
+        row = cur.fetchone()
+        if row:
+            continue
+﻿
+        side_str = pos.get("side", "Buy")
+        side = "Buy" if side_str == "Buy" else "Sell"
+        direction = 1 if side == "Buy" else -1
+﻿
+        last_price = float(
+            pos.get("markPrice")
+            or pos.get("avgPrice")
+            or pos.get("entryPrice")
+            or 0.0
+        )
+        entry_price = float(pos.get("avgPrice") or pos.get("entryPrice") or last_price)
+        now_ts = datetime.now(UTC).replace(tzinfo=None)
+﻿
+        signal_atr = 0.0
+        signal_price = entry_price
+﻿
+        trade = TradeState(
+            symbol=symbol,
+            side=side,
+            direction=direction,
+            status="open",
+            signal_time=now_ts,
+            signal_price=signal_price,
+            signal_atr=signal_atr,
+            is_weekend=is_weekend(now_ts),
+            order_id=None,
+            limit_price=None,
+        )
+        trade.entry_time = now_ts
+        trade.entry_price = entry_price
+        trade.tp_price = None
+        trade.sl_price = None
+﻿
+        logger.info(
+            "SYNC position for %s from exchange: side=%s, size=%s, entry_price=%.6f",
+            symbol, side, size, entry_price
+        )
+﻿
+        save_trade_state(trade, trade_id=None)
+﻿
+    conn.close()
+﻿
+if __name__ == "__main__":
+    try:
+        logger.info("Starting main_loop()")
+        main_loop()
+    except KeyboardInterrupt:
+        logger.info("Stopped by user (KeyboardInterrupt)")
+    except Exception as e:
+        logger.exception("Fatal error in main_loop: %s", e)
