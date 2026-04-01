@@ -7,27 +7,17 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { 
-      font-family: system-ui, sans-serif; 
-      height: 100vh; overflow: hidden; 
-      padding-top: 60px; background: #f0f2f5;
-    }
+    body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; }
     .toolbar {
-      position: fixed; top: 0; z-index: 1000; width: 100%; 
-      padding: 12px 16px; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+      position: fixed; top: 0; z-index: 1000; width: 100%; padding: 12px 16px; 
+      background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
       box-shadow: 0 4px 20px rgba(0,0,0,0.15); display: flex; align-items: center;
     }
-    .nav-btn { 
-      width: 44px; height: 44px; margin: 0 4px; background: rgba(255,255,255,0.2); 
-      color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 18px; 
-      transition: all 0.2s;
-    }
+    .nav-btn { width: 44px; height: 44px; margin: 0 4px; background: rgba(255,255,255,0.2); 
+      color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 18px; }
     .nav-btn:hover:not(:disabled) { background: rgba(255,255,255,0.3); transform: scale(1.05); }
-    .nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    #urlInput { 
-      flex: 1; margin: 0 12px; padding: 12px 16px; border: none; border-radius: 25px; 
-      font-size: 15px; background: rgba(255,255,255,0.9); color: #333;
-    }
+    #urlInput { flex: 1; margin: 0 12px; padding: 12px 16px; border: none; border-radius: 25px; 
+      font-size: 15px; background: rgba(255,255,255,0.9); color: #333; }
     #pageFrame { width: 100%; height: calc(100vh - 68px); border: none; background: white; }
   </style>
 </head>
@@ -36,15 +26,14 @@
     <button id="backBtn" class="nav-btn" title="Назад">◀</button>
     <button id="forwardBtn" class="nav-btn" title="Вперёд">▶</button>
     <button id="homeBtn" class="nav-btn" title="Яндекс">🏠</button>
-    <button id="ytBtn" class="nav-btn" title="YouTube">📺</button>
     <input id="urlInput" placeholder="ya.ru">
     <button id="goBtn" class="nav-btn" title="GO">GO</button>
   </div>
-  <iframe id="pageFrame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+  <iframe id="pageFrame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"></iframe>
 
   <script>
     const tg = window.Telegram?.WebApp;
-    const PROXY_URL = 'http://52.57.167.125/proxy.php?url=';
+    const PROXY_URL = 'https://52.57.167.125/proxy.php?url=';
     
     if (tg) {
       tg.ready(); tg.expand();
@@ -70,15 +59,11 @@
     
     const home = () => loadPage('https://ya.ru');
     document.getElementById('homeBtn').onclick = home;
-    document.getElementById('ytBtn').onclick = () => loadPage('https://m.youtube.com');
     document.getElementById('goBtn').onclick = () => loadPage(urlInput.value);
     urlInput.onkeypress = e => e.key === 'Enter' && loadPage(urlInput.value);
     
     document.getElementById('backBtn').onclick = () => {
       if (current > 0) { current--; frame.src = PROXY_URL + encodeURIComponent(history[current]); }
-    };
-    document.getElementById('forwardBtn').onclick = () => {
-      if (current < history.length - 1) { current++; frame.src = PROXY_URL + encodeURIComponent(history[current]); }
     };
     
     home();
