@@ -16,13 +16,7 @@
       padding-right: var(--tg-safe-area-inset-right, 0px);
     }
     
-    .telegram-ready { display: none; }
-    .not-telegram { 
-      text-align: center; padding: 40px 20px; 
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white; min-height: 100vh; display: flex; flex-direction: column; 
-      justify-content: center; align-items: center;
-    }
+    .not-telegram { display: none !important; }
     
     .toolbar {
       position: sticky; top: 0; z-index: 1000;
@@ -72,7 +66,7 @@
   </style>
 </head>
 <body>
-  <!-- Fallback для НЕ-Telegram -->
+  <!-- Fallback (СПРАВА скрыт) -->
   <div id="notTelegram" class="not-telegram">
     <h2 style="margin-bottom: 10px;">🧑‍💻 Telegram Мини-Браузер</h2>
     <p style="margin: 20px 0; max-width: 400px; opacity: 0.9;">
@@ -82,11 +76,10 @@
        style="display: inline-block; background: rgba(255,255,255,0.2); color: white; padding: 14px 28px; border-radius: 25px; text-decoration: none; font-weight: 600; backdrop-filter: blur(10px);">
       🚀 Открыть в Telegram
     </a>
-    <p style="margin-top: 30px; font-size: 12px; opacity: 0.8;">Яндекс • YouTube • Навигация</p>
   </div>
   
-  <!-- Браузер -->
-  <div id="browser" class="telegram-ready">
+  <!-- Браузер (ПОКАЗЫВАЕТСЯ ВСЕГДА) -->
+  <div id="browser">
     <div class="status" id="status">Инициализация...</div>
     <div class="toolbar">
       <button id="backBtn" class="nav-btn" title="Назад">◀</button>
@@ -101,28 +94,14 @@
   </div>
 
   <script>
+    // Telegram API (если доступен)
     const tg = window.Telegram?.WebApp;
-    const isTelegram = !!tg && !!tg.initData;
-  
-    const browserEl = document.getElementById('browser');
-    const notTelegramEl = document
-    
-    if (isTelegram) {
+    if (tg) {
       tg.ready();
       tg.requestSafeArea();
       tg.expand();
-      
-      notTelegram.style.display = 'none';
-      browser.style.display = 'block';
-      
-      // MainButton с параметром startapp
-      const startParam = tg.initDataUnsafe?.start_app;
-      tg.MainButton.setText(startParam === 'mini_browser' ? '⭐ Яндекс' : '⭐ Главная')
-        .onClick(() => loadUrl('https://ya.ru')).show();
-      
+      tg.MainButton.setText('⭐ Яндекс').onClick(() => loadUrl('https://ya.ru')).show();
       document.getElementById('status').textContent = 'Готов! 👋';
-    } else {
-      browser.style.display = 'none';
     }
     
     // Элементы
@@ -184,7 +163,7 @@
       try {
         status.textContent = new URL(frame.src).hostname;
       } catch(e) {
-        status.textContent = 'Загружено';
+        status.textContent = 'Загружено ✅';
       }
       updateButtons();
     };
@@ -194,7 +173,7 @@
       status.textContent = '❌ Ошибка загрузки';
     };
     
-    // Запуск
+    // Автозапуск Яндекса
     loadUrl('https://ya.ru');
   </script>
 </body>
