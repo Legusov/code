@@ -2,128 +2,86 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>🧑‍💻 Telegram Браузер</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { 
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
-      height: 100vh; overflow: hidden; background: #f8f9fa;
-      padding-top: 60px; /* ФИКС кнопок Telegram */
-      padding-bottom: env(safe-area-inset-bottom, 0px);
+      font-family: system-ui, sans-serif; 
+      height: 100vh; overflow: hidden; 
+      padding-top: 60px; background: #f0f2f5;
     }
-    
     .toolbar {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
-      display: flex; align-items: center; padding: 12px 16px; 
-      background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-      color: white; box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+      position: fixed; top: 0; z-index: 1000; width: 100%; 
+      padding: 12px 16px; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15); display: flex; align-items: center;
     }
-    
-    .nav-btn {
-      width: 40px; height: 40px; margin: 0 4px; 
-      background: rgba(255,255,255,0.2); color: white; 
-      border: none; border-radius: 8px; cursor: pointer;
-      font-size: 16px; transition: all 0.2s;
+    .nav-btn { 
+      width: 44px; height: 44px; margin: 0 4px; background: rgba(255,255,255,0.2); 
+      color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 18px; 
+      transition: all 0.2s;
     }
     .nav-btn:hover:not(:disabled) { background: rgba(255,255,255,0.3); transform: scale(1.05); }
     .nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    
-    #urlInput {
-      flex: 1; margin: 0 8px; padding: 12px 16px; 
-      border: none; border-radius: 20px; font-size: 14px;
-      background: rgba(255,255,255,0.9); color: #333;
+    #urlInput { 
+      flex: 1; margin: 0 12px; padding: 12px 16px; border: none; border-radius: 25px; 
+      font-size: 15px; background: rgba(255,255,255,0.9); color: #333;
     }
-    
-    .content {
-      height: calc(100vh - 64px); padding: 20px; overflow-y: auto;
-      background: white; border-radius: 16px 16px 0 0; margin-top: 64px;
-    }
-    
-    .site-card {
-      background: #f8f9fa; border-radius: 12px; padding: 16px; margin-bottom: 16px;
-      cursor: pointer; transition: all 0.2s;
-    }
-    .site-card:hover { background: #e9ecef; transform: translateY(-2px); }
-    
-    .site-title { font-weight: 600; font-size: 16px; margin-bottom: 4px; }
-    .site-url { font-size: 12px; color: #666; }
-    
-    .status {
-      position: fixed; bottom: 0; left: 0; right: 0; 
-      padding: 8px; background: rgba(0,0,0,0.8); color: white; 
-      font-size: 12px; text-align: center; z-index: 999;
-    }
+    #pageFrame { width: 100%; height: calc(100vh - 68px); border: none; background: white; }
   </style>
 </head>
 <body>
   <div class="toolbar">
+    <button id="backBtn" class="nav-btn" title="Назад">◀</button>
+    <button id="forwardBtn" class="nav-btn" title="Вперёд">▶</button>
     <button id="homeBtn" class="nav-btn" title="Яндекс">🏠</button>
-    <button id="bookmarkBtn" class="nav-btn" title="YouTube">📺</button>
-    <input type="text" id="urlInput" placeholder="ya.ru, google.com, youtube.com" />
-    <button id="goBtn" class="nav-btn" title="Открыть">➤</button>
+    <button id="ytBtn" class="nav-btn" title="YouTube">📺</button>
+    <input id="urlInput" placeholder="ya.ru">
+    <button id="goBtn" class="nav-btn" title="GO">GO</button>
   </div>
-  
-  <div class="content">
-    <div class="site-card" onclick="openUrl('https://ya.ru')">
-      <div class="site-title">🏠 Яндекс</div>
-      <div class="site-url">ya.ru</div>
-    </div>
-    <div class="site-card" onclick="openUrl('https://m.youtube.com')">
-      <div class="site-title">📺 YouTube Mobile</div>
-      <div class="site-url">m.youtube.com</div>
-    </div>
-    <div class="site-card" onclick="openUrl('https://www.google.com')">
-      <div class="site-title">🔍 Google</div>
-      <div class="site-url">google.com</div>
-    </div>
-    <div class="site-card" onclick="openUrl('https://vk.com')">
-      <div class="site-title">💙 ВКонтакте</div>
-      <div class="site-url">vk.com</div>
-    </div>
-  </div>
-  
-  <div class="status" id="status">Готов к работе!</div>
+  <iframe id="pageFrame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
 
   <script>
     const tg = window.Telegram?.WebApp;
+    const PROXY_URL = 'http://52.57.167.125/proxy.php?url=';
+    
     if (tg) {
-      tg.ready();
-      tg.expand();
-      tg.MainButton.setText('🚀 Открыть Яндекс').onClick(() => openUrl('https://ya.ru')).show();
+      tg.ready(); tg.expand();
+      tg.MainButton.setText('⭐ Яндекс').onClick(home).show();
     }
     
+    const frame = document.getElementById('pageFrame');
     const urlInput = document.getElementById('urlInput');
-    const status = document.getElementById('status');
+    let history = ['https://ya.ru'], current = 0;
     
-    function openUrl(url) {
+    function loadPage(url) {
       if (!url.match(/^https?:\/\//i)) url = 'https://' + url;
-      
-      status.textContent = `Открываем ${url.replace(/^https?:\/\//, '')}...`;
-      
-      if (tg) {
-        tg.openLink(url, true); // true = в браузере Telegram
-      } else {
-        window.open(url, '_blank');
-      }
+      frame.src = PROXY_URL + encodeURIComponent(url);
+      urlInput.value = url.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+      history = history.slice(0, current + 1); history.push(url); current++;
+      updateNav();
     }
     
-    // Кнопки
-    document.getElementById('homeBtn').onclick = () => openUrl('https://ya.ru');
-    document.getElementById('bookmarkBtn').onclick = () => openUrl('https://m.youtube.com');
-    document.getElementById('goBtn').onclick = () => openUrl(urlInput.value);
+    function updateNav() {
+      document.getElementById('backBtn').disabled = current <= 0;
+      document.getElementById('forwardBtn').disabled = current >= history.length - 1;
+    }
     
-    urlInput.onkeypress = (e) => { 
-      if (e.key === 'Enter') openUrl(urlInput.value); 
+    const home = () => loadPage('https://ya.ru');
+    document.getElementById('homeBtn').onclick = home;
+    document.getElementById('ytBtn').onclick = () => loadPage('https://m.youtube.com');
+    document.getElementById('goBtn').onclick = () => loadPage(urlInput.value);
+    urlInput.onkeypress = e => e.key === 'Enter' && loadPage(urlInput.value);
+    
+    document.getElementById('backBtn').onclick = () => {
+      if (current > 0) { current--; frame.src = PROXY_URL + encodeURIComponent(history[current]); }
+    };
+    document.getElementById('forwardBtn').onclick = () => {
+      if (current < history.length - 1) { current++; frame.src = PROXY_URL + encodeURIComponent(history[current]); }
     };
     
-    // Подсказки популярных сайтов
-    urlInput.onfocus = () => {
-      if (!urlInput.value) {
-        urlInput.placeholder = 'Например: ya.ru, google.com, vk.com';
-      }
-    };
+    home();
   </script>
 </body>
 </html>
