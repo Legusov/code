@@ -102,11 +102,10 @@
 
   <script>
     const tg = window.Telegram?.WebApp;
-    const isTelegram = !!tg?.initData;
-    
-    // Показываем браузер или fallback
-    const browser = document.getElementById('browser');
-    const notTelegram = document.getElementById('notTelegram');
+    const isTelegram = !!tg && !!tg.initData;
+  
+    const browserEl = document.getElementById('browser');
+    const notTelegramEl = document
     
     if (isTelegram) {
       tg.ready();
