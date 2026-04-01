@@ -1,90 +1,175 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Приветствие</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-        
-        .container {
-            text-align: center;
-            padding: 40px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 20px;
-            backdrop-filter: blur(10px);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        }
-        
-        h1 {
-            font-size: 3rem;
-            margin-bottom: 20px;
-            animation: fadeIn 2s ease-in;
-        }
-        
-        p {
-            font-size: 1.2rem;
-            opacity: 0.9;
-            animation: fadeInUp 2s ease-out;
-        }
-        
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-            }
-            to {
-                opacity: 1;
-            }
-        }
-        
-        @keyframes fadeInUp {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-            to {
-                opacity: 0.9;
-                transform: translateY(0);
-            }
-        }
-        
-        .button {
-            display: inline-block;
-            margin-top: 20px;
-            padding: 10px 20px;
-            background: white;
-            color: #667eea;
-            text-decoration: none;
-            border-radius: 25px;
-            transition: transform 0.3s;
-            animation: fadeInUp 2.5s ease-out;
-        }
-        
-        .button:hover {
-            transform: scale(1.05);
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🧑‍💻 Telegram Браузер</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
+      height: 100vh; overflow: hidden; background: #f8f9fa;
+    }
+    
+    /* Адаптация под Telegram */
+    .telegram-ready { display: none; }
+    .not-telegram { text-align: center; padding: 40px 20px; }
+    
+    .toolbar {
+      display: flex; align-items: center; padding: 12px; 
+      background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+      color: white; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    .nav-btn {
+      width: 36px; height: 36px; margin: 0 4px; 
+      background: rgba(255,255,255,0.2); color: white; 
+      border: none; border-radius: 8px; cursor: pointer;
+      font-size: 16px; transition: all 0.2s;
+    }
+    .nav-btn:hover, .nav-btn:active { background: rgba(255,255,255,0.3); transform: scale(1.05); }
+    .nav-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    
+    #urlInput {
+      flex: 1; margin: 0 8px; padding: 10px 14px; 
+      border: none; border-radius: 20px; font-size: 14px;
+      background: rgba(255,255,255,0.9); color: #333;
+    }
+    
+    #pageFrame {
+      width: 100%; height: calc(100vh - 60px); border: none; 
+      background: white;
+    }
+    
+    .status {
+      position: fixed; top: 0; left: 0; right: 0; 
+      padding: 8px; background: rgba(0,0,0,0.8); 
+      color: white; font-size: 12px; text-align: center;
+      transition: opacity 0.3s;
+    }
+    
+    /* Анимация загрузки */
+    .loading { opacity: 0.6; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+    .loading::after { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent); animation: pulse 1.5s infinite; }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <h1>👋 Привет!</h1>
-        <p>Добро пожаловать на нашу страницу!</p>
-        <a href="#" class="button" onclick="showMessage()">Нажми меня</a>
+  <!-- Для НЕ-Telegram браузеров -->
+  <div id="notTelegram" class="not-telegram">
+    <h2>🧑‍💻 Telegram Мини-Браузер</h2>
+    <p style="margin: 20px 0; color: #666; max-width: 400px; margin: 20px auto;">
+      Открой через кнопку бота в Telegram для полного функционала!
+    </p>
+    <a href="https://t.me/mini_app_for_tg_bot/miniweb" 
+       style="display: inline-block; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); color: white; padding: 14px 28px; border-radius: 25px; text-decoration: none; font-weight: 600; box-shadow: 0 4px 15px rgba(102,126,234,0.4);">
+      🚀 Открыть в Telegram
+    </a>
+    <p style="margin-top: 30px; font-size: 12px; color: #999;">
+      Адресная строка • Навигация • Полноэкранный режим
+    </p>
+  </div>
+  
+  <!-- Основной браузер для Telegram -->
+  <div id="browser" class="telegram-ready">
+    <div class="status" id="status">Готов к работе</div>
+    <div class="toolbar">
+      <button id="backBtn" class="nav-btn" title="Назад">◀</button>
+      <button id="forwardBtn" class="nav-btn" title="Вперед">▶</button>
+      <button id="reloadBtn" class="nav-btn" title="Обновить">⟳</button>
+      <input type="text" id="urlInput" placeholder="Введите URL (например: google.com)" />
+      <button id="goBtn" class="nav-btn" title="Перейти">GO</button>
     </div>
+    <iframe id="pageFrame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"></iframe>
+  </div>
+
+  <script>
+    // Инициализация
+    const tg = window.Telegram?.WebApp;
+    const isTelegram = tg && tg.initData;
     
-    <script>
-        function showMessage() {
-            alert("Спасибо, что посетили нашу страницу!");
-        }
-    </script>
+    const browser = document.getElementById('browser');
+    const notTelegram = document.getElementById('notTelegram');
+    const frame = document.getElementById('pageFrame');
+    const urlInput = document.getElementById('urlInput');
+    const status = document.getElementById('status');
+    
+    let historyStack = ['https://google.com'];
+    let currentIndex = 0;
+    
+    // Telegram готов
+    if (isTelegram) {
+      tg.ready();
+      tg.expand();
+      notTelegram.style.display = 'none';
+      browser.style.display = 'block';
+      status.textContent = `Добро пожаловать! ${tg.initDataUnsafe?.user?.first_name || ''}`;
+      
+      // Главная кнопка Telegram
+      tg.MainButton.setText('⭐ Главная').onClick(() => loadUrl('https://google.com')).show();
+    } else {
+      browser.style.display = 'none';
+    }
+    
+    // Навигация
+    function loadUrl(url) {
+      if (!url.match(/^https?:\/\//)) url = 'https://' + url;
+      
+      status.textContent = 'Загрузка...';
+      frame.classList.add('loading');
+      
+      historyStack = historyStack.slice(0, currentIndex + 1);
+      historyStack.push(url);
+      currentIndex = historyStack.length - 1;
+      
+      frame.src = url;
+      urlInput.value = url.replace(/^https?:\/\//, '');
+      updateButtons();
+    }
+    
+    function updateButtons() {
+      document.getElementById('backBtn').disabled = currentIndex <= 0;
+      document.getElementById('forwardBtn').disabled = currentIndex >= historyStack.length - 1;
+    }
+    
+    // События
+    document.getElementById('backBtn').onclick = () => {
+      if (currentIndex > 0) {
+        currentIndex--;
+        frame.src = historyStack[currentIndex];
+        urlInput.value = new URL(frame.src).hostname;
+      }
+    };
+    
+    document.getElementById('forwardBtn').onclick = () => {
+      if (currentIndex < historyStack.length - 1) {
+        currentIndex++;
+        frame.src = historyStack[currentIndex];
+        urlInput.value = new URL(frame.src).hostname;
+      }
+    };
+    
+    document.getElementById('reloadBtn').onclick = () => frame.src = frame.src;
+    
+    document.getElementById('goBtn').onclick = () => loadUrl(urlInput.value);
+    
+    urlInput.onkeypress = (e) => e.key === 'Enter' && loadUrl(urlInput.value);
+    
+    // События iframe
+    frame.onload = () => {
+      frame.classList.remove('loading');
+      status.textContent = new URL(frame.src).hostname;
+      updateButtons();
+    };
+    
+    frame.onerror = () => {
+      frame.classList.remove('loading');
+      status.textContent = 'Ошибка загрузки';
+    };
+    
+    // Загрузка главной
+    loadUrl('https://google.com');
+  </script>
 </body>
 </html>
