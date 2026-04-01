@@ -7,66 +7,120 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; }
-    .toolbar {
-      position: fixed; top: 0; z-index: 1000; width: 100%; padding: 12px 16px; 
-      background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-      box-shadow: 0 4px 20px rgba(0,0,0,0.15); display: flex; align-items: center;
+    body { 
+      font-family: system-ui, sans-serif; 
+      min-height: 100vh; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 20px; display: flex; flex-direction: column; gap: 24px;
     }
-    .nav-btn { width: 44px; height: 44px; margin: 0 4px; background: rgba(255,255,255,0.2); 
-      color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 18px; }
-    .nav-btn:hover:not(:disabled) { background: rgba(255,255,255,0.3); transform: scale(1.05); }
-    #urlInput { flex: 1; margin: 0 12px; padding: 12px 16px; border: none; border-radius: 25px; 
-      font-size: 15px; background: rgba(255,255,255,0.9); color: #333; }
-    #pageFrame { width: 100%; height: calc(100vh - 68px); border: none; background: white; }
+    .toolbar {
+      background: rgba(255,255,255,0.15); backdrop-filter: blur(20px);
+      padding: 20px; border-radius: 24px; display: flex; align-items: center; 
+      gap: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+    }
+    .nav-btn { 
+      width: 56px; height: 56px; background: rgba(255,255,255,0.2); 
+      color: white; border: none; border-radius: 16px; cursor: pointer; 
+      font-size: 24px; transition: all 0.3s ease; border: 2px solid transparent;
+    }
+    .nav-btn:hover, .nav-btn:active { 
+      background: rgba(255,255,255,0.3); transform: scale(1.05); 
+      border-color: rgba(255,255,255,0.5);
+    }
+    #urlInput { 
+      flex: 1; padding: 16px 24px; border: none; border-radius: 28px; 
+      font-size: 16px; background: rgba(255,255,255,0.9); color: #333;
+      outline: none;
+    }
+    .sites {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); 
+      gap: 20px; flex: 1;
+    }
+    .site-card {
+      background: rgba(255,255,255,0.15); border-radius: 20px; padding: 24px; 
+      text-align: center; cursor: pointer; backdrop-filter: blur(10px);
+      transition: all 0.3s ease; border: 1px solid rgba(255,255,255,0.2);
+    }
+    .site-card:hover, .site-card:active { 
+      background: rgba(255,255,255,0.25); transform: translateY(-8px); 
+      box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+    }
+    .site-emoji { font-size: 36px; margin-bottom: 12px; }
+    .site-name { color: white; font-weight: 600; font-size: 15px; }
   </style>
 </head>
 <body>
   <div class="toolbar">
-    <button id="backBtn" class="nav-btn" title="Назад">◀</button>
-    <button id="forwardBtn" class="nav-btn" title="Вперёд">▶</button>
-    <button id="homeBtn" class="nav-btn" title="Яндекс">🏠</button>
-    <input id="urlInput" placeholder="ya.ru">
-    <button id="goBtn" class="nav-btn" title="GO">GO</button>
+    <button class="nav-btn" onclick="openSite('https://ya.ru')" title="Яндекс">🏠</button>
+    <button class="nav-btn" onclick="openSite('https://m.youtube.com')" title="YouTube">📺</button>
+    <button class="nav-btn" onclick="openSite('https://google.com')" title="Google">🔍</button>
+    <button class="nav-btn" onclick="openSite('https://vk.com')" title="VK">💙</button>
+    <input id="urlInput" placeholder="ya.ru / google.com / vk.com / youtube.com">
+    <button class="nav-btn" onclick="goUrl()" title="Открыть">🚀</button>
   </div>
-  <iframe id="pageFrame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"></iframe>
+  
+  <div class="sites">
+    <div class="site-card" onclick="openSite('https://ya.ru')">
+      <div class="site-emoji">🏠</div><div class="site-name">Яндекс</div>
+    </div>
+    <div class="site-card" onclick="openSite('https://m.youtube.com')">
+      <div class="site-emoji">📺</div><div class="site-name">YouTube</div>
+    </div>
+    <div class="site-card" onclick="openSite('https://google.com')">
+      <div class="site-emoji">🔍</div><div class="site-name">Google</div>
+    </div>
+    <div class="site-card" onclick="openSite('https://vk.com')">
+      <div class="site-emoji">💙</div><div class="site-name">ВКонтакте</div>
+    </div>
+    <div class="site-card" onclick="openSite('https://mail.ru')">
+      <div class="site-emoji">📧</div><div class="site-name">Mail.ru</div>
+    </div>
+    <div class="site-card" onclick="openSite('https://ok.ru')">
+      <div class="site-emoji">👥</div><div class="site-name">Одноклассники</div>
+    </div>
+    <div class="site-card" onclick="openSite('https://avito.ru')">
+      <div class="site-emoji">🛒</div><div class="site-name">Avito</div>
+    </div>
+    <div class="site-card" onclick="openSite('https://t.me')">
+      <div class="site-emoji">✈️</div><div class="site-name">Telegram</div>
+    </div>
+  </div>
 
   <script>
     const tg = window.Telegram?.WebApp;
-    const PROXY_URL = 'https://52.57.167.125/proxy.php?url=';
+    const PROXY_URL = 'http://52.57.167.125/proxy.php?url=';
     
     if (tg) {
-      tg.ready(); tg.expand();
-      tg.MainButton.setText('⭐ Яндекс').onClick(home).show();
+      tg.ready(); 
+      tg.expand();
+      tg.MainButton.setText('🚀 Яндекс').onClick(() => openSite('https://ya.ru')).show();
+      tg.setHeaderPanelColor('#667eea');
+      tg.setBackgroundColor('#f8f9fa');
     }
     
-    const frame = document.getElementById('pageFrame');
-    const urlInput = document.getElementById('urlInput');
-    let history = ['https://ya.ru'], current = 0;
-    
-    function loadPage(url) {
+    function openSite(url) {
       if (!url.match(/^https?:\/\//i)) url = 'https://' + url;
-      frame.src = PROXY_URL + encodeURIComponent(url);
-      urlInput.value = url.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
-      history = history.slice(0, current + 1); history.push(url); current++;
-      updateNav();
+      const proxyUrl = PROXY_URL + encodeURIComponent(url);
+      
+      // tg.openLink() открывает в системном браузере Telegram
+      if (tg) {
+        tg.openLink(proxyUrl);
+      } else {
+        window.open(proxyUrl, '_blank');
+      }
     }
     
-    function updateNav() {
-      document.getElementById('backBtn').disabled = current <= 0;
-      document.getElementById('forwardBtn').disabled = current >= history.length - 1;
+    function goUrl() {
+      const url = document.getElementById('urlInput').value.trim();
+      if (url) openSite(url);
     }
     
-    const home = () => loadPage('https://ya.ru');
-    document.getElementById('homeBtn').onclick = home;
-    document.getElementById('goBtn').onclick = () => loadPage(urlInput.value);
-    urlInput.onkeypress = e => e.key === 'Enter' && loadPage(urlInput.value);
+    // Enter в поле ввода
+    document.getElementById('urlInput').addEventListener('keypress', e => {
+      if (e.key === 'Enter') goUrl();
+    });
     
-    document.getElementById('backBtn').onclick = () => {
-      if (current > 0) { current--; frame.src = PROXY_URL + encodeURIComponent(history[current]); }
-    };
-    
-    home();
+    // Фокус на поле ввода
+    document.getElementById('urlInput').focus();
   </script>
 </body>
 </html>
