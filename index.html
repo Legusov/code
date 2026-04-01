@@ -3,85 +3,82 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🧑‍💻 Telegram Браузер</title>
+  <title>🔓 Антиблокировщик</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { 
       font-family: system-ui, sans-serif; 
-      min-height: 100vh; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh; background: linear-gradient(135deg, #ff6b6b 0%, #4ecdc4 100%);
       padding: 20px; display: flex; flex-direction: column; gap: 24px;
     }
     .toolbar {
-      background: rgba(255,255,255,0.15); backdrop-filter: blur(20px);
-      padding: 20px; border-radius: 24px; display: flex; align-items: center; 
-      gap: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+      background: rgba(255,255,255,0.2); backdrop-filter: blur(20px);
+      padding: 20px; border-radius: 24px; display: flex; align-items: center; gap: 16px;
     }
     .nav-btn { 
-      width: 56px; height: 56px; background: rgba(255,255,255,0.2); 
-      color: white; border: none; border-radius: 16px; cursor: pointer; 
-      font-size: 24px; transition: all 0.3s ease; border: 2px solid transparent;
+      width: 56px; height: 56px; background: rgba(255,255,255,0.3); 
+      color: white; border: none; border-radius: 16px; cursor: pointer; font-size: 24px;
+      transition: all 0.3s ease;
     }
-    .nav-btn:hover, .nav-btn:active { 
-      background: rgba(255,255,255,0.3); transform: scale(1.05); 
-      border-color: rgba(255,255,255,0.5);
-    }
+    .nav-btn:hover { background: rgba(255,255,255,0.4); transform: scale(1.05); }
     #urlInput { 
       flex: 1; padding: 16px 24px; border: none; border-radius: 28px; 
       font-size: 16px; background: rgba(255,255,255,0.9); color: #333;
-      outline: none;
     }
-    .sites {
+    .sites { 
       display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); 
       gap: 20px; flex: 1;
     }
     .site-card {
-      background: rgba(255,255,255,0.15); border-radius: 20px; padding: 24px; 
-      text-align: center; cursor: pointer; backdrop-filter: blur(10px);
-      transition: all 0.3s ease; border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.2); border-radius: 20px; padding: 24px; 
+      text-align: center; cursor: pointer; backdrop-filter: blur(10px); transition: all 0.3s;
+      border: 2px solid rgba(255,255,255,0.3);
     }
-    .site-card:hover, .site-card:active { 
-      background: rgba(255,255,255,0.25); transform: translateY(-8px); 
-      box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+    .site-card:hover { 
+      background: rgba(255,255,255,0.3); transform: translateY(-8px); 
+      border-color: rgba(255,255,255,0.6);
     }
     .site-emoji { font-size: 36px; margin-bottom: 12px; }
     .site-name { color: white; font-weight: 600; font-size: 15px; }
+    .blocked { animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.7); } 50% { box-shadow: 0 0 0 20px rgba(255,255,255,0); } }
   </style>
 </head>
 <body>
   <div class="toolbar">
-    <button class="nav-btn" onclick="openSite('https://ya.ru')" title="Яндекс">🏠</button>
-    <button class="nav-btn" onclick="openSite('https://m.youtube.com')" title="YouTube">📺</button>
-    <button class="nav-btn" onclick="openSite('https://google.com')" title="Google">🔍</button>
-    <button class="nav-btn" onclick="openSite('https://vk.com')" title="VK">💙</button>
-    <input id="urlInput" placeholder="ya.ru / google.com / vk.com / youtube.com">
-    <button class="nav-btn" onclick="goUrl()" title="Открыть">🚀</button>
+    <button class="nav-btn" onclick="openSite('twitter.com')" title="Twitter">🐦</button>
+    <button class="nav-btn" onclick="openSite('facebook.com')" title="Facebook">📘</button>
+    <button class="nav-btn" onclick="openSite('instagram.com')" title="Instagram">📷</button>
+    <button class="nav-btn" onclick="openSite('t.me')" title="Telegram">✈️</button>
+    <input id="urlInput" placeholder="twitter.com / facebook.com / instagram.com">
+    <button class="nav-btn" onclick="goUrl()" title="🔓 Разблокировать">🔓</button>
   </div>
   
   <div class="sites">
-    <div class="site-card" onclick="openSite('https://ya.ru')">
-      <div class="site-emoji">🏠</div><div class="site-name">Яндекс</div>
+    <div class="site-card blocked" onclick="openSite('twitter.com')">
+      <div class="site-emoji">🐦</div><div class="site-name">Twitter</div>
     </div>
-    <div class="site-card" onclick="openSite('https://m.youtube.com')">
-      <div class="site-emoji">📺</div><div class="site-name">YouTube</div>
+    <div class="site-card blocked" onclick="openSite('facebook.com')">
+      <div class="site-emoji">📘</div><div class="site-name">Facebook</div>
     </div>
-    <div class="site-card" onclick="openSite('https://google.com')">
-      <div class="site-emoji">🔍</div><div class="site-name">Google</div>
+    <div class="site-card blocked" onclick="openSite('instagram.com')">
+      <div class="site-emoji">📷</div><div class="site-name">Instagram</div>
     </div>
-    <div class="site-card" onclick="openSite('https://vk.com')">
-      <div class="site-emoji">💙</div><div class="site-name">ВКонтакте</div>
+    <div class="site-card blocked" onclick="openSite('t.me/s/durov')">
+      <div class="site-emoji">✈️</div><div class="site-name">Telegram News</div>
     </div>
-    <div class="site-card" onclick="openSite('https://mail.ru')">
-      <div class="site-emoji">📧</div><div class="site-name">Mail.ru</div>
+    <div class="site-card blocked" onclick="openSite('rutracker.org')">
+      <div class="site-emoji">🎬</div><div class="site-name">RuTracker</div>
     </div>
-    <div class="site-card" onclick="openSite('https://ok.ru')">
-      <div class="site-emoji">👥</div><div class="site-name">Одноклассники</div>
+    <div class="site-card blocked" onclick="openSite('thepiratebay.org')">
+      <div class="site-emoji">🧲</div><div class="site-name">PirateBay</div>
     </div>
-    <div class="site-card" onclick="openSite('https://avito.ru')">
-      <div class="site-emoji">🛒</div><div class="site-name">Avito</div>
+    <div class="site-card" onclick="openSite('bbc.com')">
+      <div class="site-emoji">🇬🇧</div><div class="site-name">BBC News</div>
     </div>
-    <div class="site-card" onclick="openSite('https://t.me')">
-      <div class="site-emoji">✈️</div><div class="site-name">Telegram</div>
+    <div class="site-card" onclick="openSite('dw.com')">
+      <div class="site-emoji">🇩🇪</div><div class="site-name">DW News</div>
     </div>
   </div>
 
@@ -90,18 +87,15 @@
     const PROXY_URL = 'http://52.57.167.125/proxy.php?url=';
     
     if (tg) {
-      tg.ready(); 
-      tg.expand();
-      tg.MainButton.setText('🚀 Яндекс').onClick(() => openSite('https://ya.ru')).show();
-      tg.setHeaderPanelColor('#667eea');
-      tg.setBackgroundColor('#f8f9fa');
+      tg.ready(); tg.expand();
+      tg.MainButton.setText('🔓 Twitter').onClick(() => openSite('twitter.com')).show();
+      tg.setHeaderPanelColor('#ff6b6b');
     }
     
     function openSite(url) {
       if (!url.match(/^https?:\/\//i)) url = 'https://' + url;
       const proxyUrl = PROXY_URL + encodeURIComponent(url);
       
-      // tg.openLink() открывает в системном браузере Telegram
       if (tg) {
         tg.openLink(proxyUrl);
       } else {
@@ -114,12 +108,10 @@
       if (url) openSite(url);
     }
     
-    // Enter в поле ввода
     document.getElementById('urlInput').addEventListener('keypress', e => {
       if (e.key === 'Enter') goUrl();
     });
     
-    // Фокус на поле ввода
     document.getElementById('urlInput').focus();
   </script>
 </body>
