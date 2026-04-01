@@ -111,6 +111,10 @@
   <script>
     const tg = window.Telegram?.WebApp;
     const isTelegram = tg && tg.initData;
+    const startParam = tg.initDataUnsafe?.start_app; // "mini_browser"
+    if (startParam === 'mini_browser') {
+      tg.MainButton.setText('⭐ Яндекс');
+    }
 
     if (isTelegram && (!tg.initData || tg.initDataUnsafe?.web_app_data)) {
       console.log('Mini App OK');
