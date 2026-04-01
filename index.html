@@ -103,6 +103,14 @@
   <script>
     const tg = window.Telegram?.WebApp;
     const isTelegram = tg && tg.initData;
+
+    if (isTelegram && (!tg.initData || tg.initDataUnsafe?.web_app_data)) {
+      console.log('Mini App OK');
+    } else {
+      tg?.showAlert('🔄 Перезапусти через кнопку бота');
+      tg?.close();
+      return;
+    }
     
     const browser = document.getElementById('browser');
     const notTelegram = document.getElementById('notTelegram');
