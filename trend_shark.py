@@ -91,14 +91,13 @@ DRAWDOWN_STEP = 1.0
 GLOBAL_PROFIT_CLOSE = 1.0
 ESTIMATED_FEE_PERCENT = 0.12  # Примерный размер комиссий за закрытие всех позиций (taker fee ~0.06% * 2 стороны)
 TARGET_USD_PER_POSITION = 50.0
-INITIAL_TOTAL_BALANCE = 1100.0   # суммарный стартовый баланс всех аккаунтов (10×100)
-TARGET_BUY = 5               # сколько Buy-позиций открывать
-TARGET_SELL = 5              # сколько Sell-позиций открывать
-TARGET_POSITIONS = TARGET_BUY + TARGET_SELL      # можно оставить или удалить – теперь используется сумма TARGET_BUY + TARGET_SELL
-
+INITIAL_TOTAL_BALANCE = 1100.0  # суммарный стартовый баланс всех аккаунтов (10×100)
+TARGET_BUY = 5  # сколько Buy-позиций открывать
+TARGET_SELL = 5  # сколько Sell-позиций открывать
+TARGET_POSITIONS = TARGET_BUY + TARGET_SELL  # можно оставить или удалить – теперь используется сумма TARGET_BUY + TARGET_SELL
 
 CONFIGS = [DEMO_CONFIG, DEMO_CONFIG1, DEMO_CONFIG2, DEMO_CONFIG3, DEMO_CONFIG4,
-           DEMO_CONFIG5, DEMO_CONFIG6, DEMO_CONFIG7, DEMO_CONFIG8, DEMO_CONFIG9, DEMO_CONFIG10, DEMO_CONFIG11]
+           DEMO_CONFIG5, DEMO_CONFIG6, DEMO_CONFIG7, DEMO_CONFIG8, DEMO_CONFIG9, DEMO_CONFIG10]
 
 
 def create_session_with_proxy(config):
@@ -482,7 +481,26 @@ def close_all_positions_old(sess, account_idx=0):
         position_idx = 1 if side == "Buy" else 2
 
         # Получаем текущую цену как цену открытия для расчета (хотя лучше брать из БД)
-        price_before = get_ticker_price(sess, symbol)
+        # Получаем цену прямо перед закрытием (для лога слипажа, если нужно)
+        price_at_close_trigger = get_ticker_price(sess, symbol)
+
+        # --- НОВОЕ: Получаем РЕАЛЬНУЮ цену открытия из БД ---
+        real_open_price = None
+        try:
+            conn_temp = sqlite3.connect(DB_NAME)
+            c_temp = conn_temp.cursor()
+            c_temp.execute('''SELECT open_price FROM position_log 
+                             WHERE symbol=? AND account_idx=? AND action='open' 
+                             ORDER BY timestamp DESC LIMIT 1''', (symbol, account_idx))
+            row = c_temp.fetchone()
+            if row:
+                real_open_price = row[0]
+            conn_temp.close()
+        except:
+            pass
+
+        if real_open_price is None:
+            real_open_price = price_at_close_trigger
 
         order = sess.place_order(
             category="linear",
@@ -491,7 +509,6 @@ def close_all_positions_old(sess, account_idx=0):
             orderType="Market",
             qty=str(abs(size)),
             positionIdx=position_idx,
-
             reduceOnly=True,
             timeInForce="GTC"
         )
@@ -508,25 +525,25 @@ def close_all_positions_old(sess, account_idx=0):
                 price_after = get_ticker_price(sess, symbol)
 
         if price_after is None:
-            price_after = get_ticker_price(sess, symbol) or price_before
+            price_after = get_ticker_price(sess, symbol) or price_at_close_trigger
 
-        print(f"Закрыта позиция {symbol} {side} по цене {price_after}")
+        print(f"Закрыта позиция {symbol} {side} по цене {price_after} (открыта по {real_open_price})")
 
         profit = 0
         profit_percent = 0
-        if price_before and price_after:
-            # Получаем плечо из cycle_info если оно там есть
+        if real_open_price and price_after:
             leverages_info = load_cycle_info('leverages') or {}
             lev = leverages_info.get(symbol, 100)
 
             if side == "Buy":
-                profit_percent = ((price_after - price_before) / price_before) * 100 * lev
+                profit = (price_after - real_open_price) * abs(size)
+                profit_percent = (profit / (abs(size) * real_open_price)) * 100 * lev
             else:
-                profit_percent = ((price_before - price_after) / price_before) * 100 * lev
-            profit = (profit_percent / 100 / lev) * abs(size) * price_before
+                profit = (real_open_price - price_after) * abs(size)
+                profit_percent = (profit / (abs(size) * real_open_price)) * 100 * lev
 
         log_position("close", account_idx, symbol, side, abs(size), None,
-                     open_price=price_before, close_price=price_after,
+                     open_price=real_open_price, close_price=price_after,
                      profit=profit, profit_percent=profit_percent)
 
         is_win = profit > 0
@@ -547,6 +564,7 @@ def close_all_positions_old(sess, account_idx=0):
     time.sleep(6)
     return total_profit, trades_count, winning_trades, losing_trades
 
+
 def close_all_positions(sess, account_idx=0):
     # Получаем baseline (баланс до открытия) из БД
     states = load_cycle_state()
@@ -565,7 +583,26 @@ def close_all_positions(sess, account_idx=0):
         close_side = "Sell" if side == "Buy" else "Buy"
         position_idx = 1 if side == "Buy" else 2
 
-        price_before = get_ticker_price(sess, symbol)
+        # Получаем цену прямо перед закрытием
+        price_at_close_trigger = get_ticker_price(sess, symbol)
+
+        # --- НОВОЕ: Получаем РЕАЛЬНУЮ цену открытия из БД ---
+        real_open_price = None
+        try:
+            conn_temp = sqlite3.connect(DB_NAME)
+            c_temp = conn_temp.cursor()
+            c_temp.execute('''SELECT open_price FROM position_log 
+                             WHERE symbol=? AND account_idx=? AND action='open' 
+                             ORDER BY timestamp DESC LIMIT 1''', (symbol, account_idx))
+            row = c_temp.fetchone()
+            if row:
+                real_open_price = row[0]
+            conn_temp.close()
+        except:
+            pass
+
+        if real_open_price is None:
+            real_open_price = price_at_close_trigger
 
         order = sess.place_order(
             category="linear",
@@ -589,24 +626,25 @@ def close_all_positions(sess, account_idx=0):
                 price_after = get_ticker_price(sess, symbol)
 
         if price_after is None:
-            price_after = get_ticker_price(sess, symbol) or price_before
+            price_after = get_ticker_price(sess, symbol) or price_at_close_trigger
 
-        print(f"Закрыта позиция {symbol} {side} по цене {price_after}")
+        print(f"Закрыта позиция {symbol} {side} по цене {price_after} (открыта по {real_open_price})")
 
         profit = 0
         profit_percent = 0
-        if price_before and price_after:
+        if real_open_price and price_after:
             leverages_info = load_cycle_info('leverages') or {}
             lev = leverages_info.get(symbol, 100)
 
             if side == "Buy":
-                profit_percent = ((price_after - price_before) / price_before) * 100 * lev
+                profit = (price_after - real_open_price) * abs(size)
+                profit_percent = (profit / (abs(size) * real_open_price)) * 100 * lev
             else:
-                profit_percent = ((price_before - price_after) / price_before) * 100 * lev
-            profit = (profit_percent / 100 / lev) * abs(size) * price_before
+                profit = (real_open_price - price_after) * abs(size)
+                profit_percent = (profit / (abs(size) * real_open_price)) * 100 * lev
 
         log_position("close", account_idx, symbol, side, abs(size), None,
-                     open_price=price_before, close_price=price_after,
+                     open_price=real_open_price, close_price=price_after,
                      profit=profit, profit_percent=profit_percent)
 
         is_win = profit > 0
@@ -635,7 +673,8 @@ def close_all_positions(sess, account_idx=0):
     if baseline is not None:
         diff = balance_after - baseline
         diff_percent = (diff / baseline * 100) if baseline != 0 else 0
-        print(f"{account_name}: баланс до открытия (baseline): {baseline:.2f} USDT, после закрытия: {balance_after:.2f} USDT, изменение: {diff:+.2f} USDT ({diff_percent:+.2f}%)")
+        print(
+            f"{account_name}: баланс до открытия (baseline): {baseline:.2f} USDT, после закрытия: {balance_after:.2f} USDT, изменение: {diff:+.2f} USDT ({diff_percent:+.2f}%)")
     else:
         print(f"{account_name}: баланс после закрытия: {balance_after:.2f} USDT (baseline не найден)")
 
@@ -647,6 +686,7 @@ def close_all_positions(sess, account_idx=0):
         print(f"Баланс {account_name} обновлён в состоянии: {balance_after:.2f} USDT")
     time.sleep(6)
     return total_profit, trades_count, winning_trades, losing_trades
+
 
 def get_balance_safe(idx):
     return safe_api_call(idx, get_balance)
@@ -1045,6 +1085,7 @@ def get_signal_any(sess, num_symbols=20):
         print(f"  {sym} -> {side}")
     return result
 
+
 def get_signal_5_5(sess, target_buy=TARGET_BUY, target_sell=TARGET_SELL):
     try:
         resp = sess.get_instruments_info(category="linear")
@@ -1165,6 +1206,7 @@ def get_signal_5_5(sess, target_buy=TARGET_BUY, target_sell=TARGET_SELL):
     if sell_symbols:
         print("  Sell:", ', '.join(sell_symbols))
     return buy_symbols, sell_symbols
+
 
 def get_signal(sess, target_buy=TARGET_BUY, target_sell=TARGET_SELL):
     try:
@@ -1301,6 +1343,7 @@ def get_signal(sess, target_buy=TARGET_BUY, target_sell=TARGET_SELL):
     if sell_symbols:
         print("  Sell:", ', '.join(sell_symbols))
     return buy_symbols, sell_symbols
+
 
 def print_status():
     states = load_cycle_state()
@@ -1445,6 +1488,7 @@ def print_analytics_old():
     conn.close()
     print("=" * 70 + "\n")
 
+
 def print_analytics():
     """Выводит аналитику по текущему состоянию"""
     print("\n" + "=" * 70)
@@ -1474,10 +1518,11 @@ def print_analytics():
         win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
 
         print(f"  Всего трейдов:     {total_trades}")
-        print(f"  Общая прибыль:     {total_profit:.2f} USDT")
+        print(f"  Прибыль по логам:  {total_profit:.2f} USDT (сумма всех закрытых сделок)")
         print(f"  Средняя прибыль:   {avg_profit:.2f}%")
         print(f"  Выигрышных:        {winning_trades} ({win_rate:.1f}%)")
         print(f"  Проигрышных:       {losing_trades}")
+        print(f"  Безубыточных:      {total_trades - winning_trades - losing_trades}")
 
         # НОВОЕ: получить последний суммарный баланс из снимков
         c.execute("SELECT total_balance FROM balance_snapshots ORDER BY timestamp DESC LIMIT 1")
@@ -1485,11 +1530,13 @@ def print_analytics():
         if snap_row:
             current_total = snap_row[0]
             total_profit_from_start = current_total - INITIAL_TOTAL_BALANCE
-            total_roi_from_start = (total_profit_from_start / INITIAL_TOTAL_BALANCE) * 100 if INITIAL_TOTAL_BALANCE > 0 else 0
-            print(f"  Текущий общий баланс: {current_total:.2f} USDT")
+            total_roi_from_start = (
+                                               total_profit_from_start / INITIAL_TOTAL_BALANCE) * 100 if INITIAL_TOTAL_BALANCE > 0 else 0
+            print(f"  --- Реальный рост капитала ---")
             print(f"  Начальный баланс:     {INITIAL_TOTAL_BALANCE:.2f} USDT")
-            print(f"  Прибыль от старта:    {total_profit_from_start:.2f} USDT")
-            print(f"  Общий ROI от старта:  {total_roi_from_start:.2f}%")
+            print(f"  Текущий баланс:       {current_total:.2f} USDT")
+            print(f"  Чистая прибыль:       {total_profit_from_start:.2f} USDT")
+            print(f"  Реальный ROI:         {total_roi_from_start:.2f}%")
         else:
             print("  Нет данных о балансах для расчёта ROI от старта")
 
@@ -1503,6 +1550,7 @@ def print_analytics():
 
     conn.close()
     print("=" * 70 + "\n")
+
 
 def fix_cycle_state(states):
     fixed = False
@@ -1665,564 +1713,6 @@ def sync_positions_with_exchange(states, baseline_total, leverages):
 
     print("=== СИНХРОНИЗАЦИЯ ЗАВЕРШЕНА ===")
     return states
-
-
-def main_old():
-    init_db()
-    print("Бот запущен. Режим: кросс-маржа, хеджирование.")
-
-    # Загружаем состояние
-    states = load_cycle_state()
-
-    if states is not None:
-        print("Обнаружен активный цикл. Синхронизируем с биржей...")
-        baseline_total = load_cycle_info('baseline_total')
-
-        # Если цикл активен (есть позиции), но baseline_total не задан в БД
-        if baseline_total is None:
-            # Проверяем, есть ли реально открытые позиции
-            any_pos = False
-            for idx in range(len(CONFIGS)):
-                if get_open_positions_safe(idx):
-                    any_pos = True
-                    break
-
-            if any_pos:
-                # Фиксируем текущую сумму балансов как точку отсчета для текущего "живого" цикла
-                current_live_balances = []
-                for idx in range(len(CONFIGS)):
-                    bal = get_balance_safe(idx)
-                    current_live_balances.append(bal if bal is not None else states[idx]['last_balance'])
-
-                baseline_total = sum(current_live_balances)
-                save_cycle_info('baseline_total', baseline_total)
-                print(
-                    f"ВНИМАНИЕ: Обнаружены открытые позиции, но baseline_total отсутствовал. Фиксируем текущий суммарный баланс {baseline_total:.2f} USDT как точку отсчета.")
-            else:
-                # Если позиций нет, берем сумму из состояний (стандартное поведение)
-                baseline_total = sum(st['baseline'] for st in states)
-
-        leverages = load_cycle_info('leverages')
-        if leverages is None:
-            db_positions = load_positions()
-            leverages = {}
-            for symbol, _, _ in db_positions:
-                _, _, max_lev = get_instrument_info_safe(0, symbol)
-                if max_lev is not None:
-                    leverages[symbol] = max_lev
-            save_cycle_info('leverages', leverages)
-
-        states = sync_positions_with_exchange(states, baseline_total, leverages)
-        save_cycle_state(states)
-
-    print_status()
-
-    if SHOW_PLOT:
-        plt.ion()
-        plt.show(block=False)
-
-    # Переменные для отслеживания статистики
-    snapshot_counter = 0
-    peak_balance = 0
-    wave_start_balance = 0
-    wave_start_time = datetime.datetime.now()
-    wave_max_profit = 0
-    wave_max_drawdown = 0
-
-    while True:
-        states = load_cycle_state()
-        if states is None:
-            print("Ожидание сигнала для нового цикла...")
-            signal = get_signal(sessions[0])
-            if not signal:
-                print("Сигнал пуст, ждём 30 сек...")
-                time.sleep(60)
-                continue
-
-            print("Получение начальных балансов для нового цикла...")
-
-            # Проверяем, что на аккаунтах действительно нет позиций перед фиксацией baseline
-            any_pos = False
-            for idx in range(len(CONFIGS)):
-                if get_open_positions_safe(idx):
-                    any_pos = True
-                    break
-
-            if any_pos:
-                print("Обнаружены активные позиции. Ожидаем их закрытия перед началом нового цикла...")
-                time.sleep(30)
-                continue
-
-            baselines = []
-            for idx in range(len(CONFIGS)):
-                bal = get_balance_safe(idx)
-                if bal is None:
-                    print(f"Не удалось получить баланс для аккаунта {idx}, прерываем")
-                    break
-                baselines.append(bal)
-            else:
-                positions = []
-                leverages = {}
-                opened_symbols = set()
-                for symbol, side in signal:
-                    if symbol in opened_symbols:
-                        continue
-                    qty, max_lev = calculate_qty(0, symbol)
-                    if qty is None:
-                        print(f"Пропускаем {symbol}: не удалось рассчитать qty")
-                        continue
-                    positions.append((symbol, side, qty))
-                    leverages[symbol] = max_lev
-                    opened_symbols.add(symbol)
-                    if len(positions) >= TARGET_POSITIONS:
-                        break
-
-                if len(positions) < TARGET_POSITIONS:
-                    print(f"Получено только {len(positions)} позиций из {TARGET_POSITIONS}, ждём новый сигнал")
-                    continue
-
-                save_positions(positions)
-
-                init_states = []
-                for idx, bal in enumerate(baselines):
-                    init_states.append({
-                        'baseline': bal,
-                        'last_balance': bal,
-                        'active': False,
-                        'opened': False,
-                        'closed': False,
-                        'wave': 0,
-                        'activation_level': 0.0
-                    })
-                print(f"Открываем позиции на основном аккаунте (волна 0, цель: {TARGET_POSITIONS})...")
-                success_count = 0
-                for symbol, side, qty in positions:
-                    if place_order_safe(0, symbol, side, qty, leverages[symbol]):
-                        success_count += 1
-                    time.sleep(0.2)
-
-                if success_count == 0:
-                    print("Не удалось открыть ни одной позиции, завершаем попытку.")
-                    continue
-
-                init_states[0]['opened'] = True
-                init_states[0]['active'] = True
-                init_states[0]['wave'] = 0
-
-                save_cycle_state(init_states)
-                baseline_total = sum(baselines)
-                save_cycle_info('baseline_total', baseline_total)
-                save_cycle_info('leverages', leverages)
-                save_cycle_info('last_activation_level', -DRAWDOWN_STEP)
-                save_cycle_info('wave_start_level', -DRAWDOWN_STEP)
-                print(f"Новый цикл запущен. Открыто {success_count} позиций. Начинаем мониторинг.")
-                states = init_states
-
-                # Сохраняем начальный снимок
-                current_total = sum(st['last_balance'] for st in states)
-                total_roi = (current_total - baseline_total) / baseline_total * 100 if baseline_total else 0
-                log_balance_snapshot(states, current_total, total_roi, 0)
-                peak_balance = current_total
-                wave_start_balance = current_total
-                wave_start_time = datetime.datetime.now()
-                wave_max_profit = 0
-                wave_max_drawdown = 0
-                continue
-        else:
-            print("Обнаружен активный цикл. Загружаем состояние и продолжаем мониторинг.")
-            states, last_activation_level, wave_start_level = fix_cycle_state(states)
-            main_positions = get_open_positions_safe(0)
-            if not main_positions and states[0]['opened']:
-                print("На основном аккаунте нет позиций, хотя состояние говорит об открытых. Завершаем цикл.")
-                clear_cycle()
-                continue
-            baseline_total = load_cycle_info('baseline_total')
-            if baseline_total is None:
-                baseline_total = sum(st['baseline'] for st in states)
-            leverages = load_cycle_info('leverages')
-            if leverages is None:
-                db_positions = load_positions()
-                leverages = {}
-                for symbol, _, _ in db_positions:
-                    _, _, max_lev = get_instrument_info_safe(0, symbol)
-                    if max_lev is not None:
-                        leverages[symbol] = max_lev
-                save_cycle_info('leverages', leverages)
-
-            # Восстанавливаем peak_balance
-            conn = sqlite3.connect(DB_NAME)
-            cursor = conn.cursor()
-            cursor.execute("SELECT total_balance FROM balance_snapshots ORDER BY total_balance DESC LIMIT 1")
-            row = cursor.fetchone()
-            if row:
-                peak_balance = row[0]
-            conn.close()
-
-        print("Начинаем мониторинг...")
-        wave = states[0].get('wave', 0)
-        last_activation_level = load_cycle_info('last_activation_level')
-        wave_start_level = load_cycle_info('wave_start_level')
-
-        if last_activation_level is None:
-            max_opened = 0
-            for i in range(1, 11):
-                if states[i]['opened']:
-                    max_opened = i
-            if max_opened > 0:
-                last_activation_level = -DRAWDOWN_STEP * (wave * 11 + max_opened)
-            else:
-                last_activation_level = -DRAWDOWN_STEP * (wave + 1)
-            save_cycle_info('last_activation_level', last_activation_level)
-
-        if wave_start_level is None:
-            wave_start_level = -DRAWDOWN_STEP * (wave + 1)
-            save_cycle_info('wave_start_level', wave_start_level)
-
-        while True:
-            time.sleep(10)
-
-            # ===== ПЕРЕЗАГРУЖАЕМ СОСТОЯНИЕ ИЗ БД =====
-            states = load_cycle_state()
-            if states is None:
-                print("Состояние не загружено, выходим из цикла.")
-                break
-
-            # Обновляем переменные
-            wave = states[0].get('wave', 0)
-            baseline_total = load_cycle_info('baseline_total')
-            if baseline_total is None:
-                baseline_total = sum(st['baseline'] for st in states)
-            leverages = load_cycle_info('leverages')
-            if leverages is None:
-                db_positions = load_positions()
-                leverages = {}
-                for symbol, _, _ in db_positions:
-                    _, _, max_lev = get_instrument_info_safe(0, symbol)
-                    if max_lev is not None:
-                        leverages[symbol] = max_lev
-                save_cycle_info('leverages', leverages)
-            last_activation_level = load_cycle_info('last_activation_level')
-            wave_start_level = load_cycle_info('wave_start_level')
-            # ==========================================
-
-            for idx, st in enumerate(states):
-                if st['opened'] and not st['closed']:
-                    bal = get_balance_safe(idx)
-                    if bal is not None:
-                        st['last_balance'] = bal
-
-            save_cycle_state(states)
-
-            current_total = sum(st['last_balance'] for st in states)
-            total_roi = (current_total - baseline_total) / baseline_total * 100 if baseline_total else 0
-
-            main_bal = states[0]['last_balance']
-            main_baseline = states[0]['baseline']
-            main_roi = (main_bal - main_baseline) / main_baseline * 100 if main_baseline else 0
-
-            if SHOW_PLOT:
-                update_plot(main_roi, last_activation_level, wave_start_level, states)
-                plt.pause(0.001)
-
-            # Сохраняем снимки балансов каждые 10 циклов
-            snapshot_counter += 1
-            if snapshot_counter % 10 == 0:
-                log_balance_snapshot(states, current_total, total_roi, wave)
-                log_daily_stats()
-
-                # Сохраняем ROI историю
-                sub_rois = []
-                for i in range(1, 11):
-                    if states[i]['opened'] and not states[i]['closed']:
-                        sub_base = states[i]['baseline']
-                        if sub_base and sub_base > 0:
-                            sub_roi = (states[i]['last_balance'] - sub_base) / sub_base * 100
-                            sub_rois.append(sub_roi)
-
-                avg_sub_roi = sum(sub_rois) / len(sub_rois) if sub_rois else 0
-                max_sub_roi = max(sub_rois) if sub_rois else 0
-                min_sub_roi = min(sub_rois) if sub_rois else 0
-                open_positions = sum(1 for i in range(1, 11) if states[i]['opened'] and not states[i]['closed'])
-
-                log_roi_history(total_roi, main_roi, avg_sub_roi, max_sub_roi, min_sub_roi, open_positions)
-
-                # Сохраняем просадку
-                if current_total > peak_balance:
-                    peak_balance = current_total
-
-                # Статистика текущей волны
-                current_wave_profit = current_total - wave_start_balance
-                if current_wave_profit > wave_max_profit:
-                    wave_max_profit = current_wave_profit
-
-                drawdown_abs = peak_balance - current_total
-                if drawdown_abs > wave_max_drawdown:
-                    wave_max_drawdown = drawdown_abs
-
-                drawdown_percent = (drawdown_abs / peak_balance * 100) if peak_balance > 0 else 0
-                log_drawdown(current_total, peak_balance, drawdown_percent)
-
-            # Проверка состояния перед поиском следующего субаккаунта
-            # print("DEBUG состояния субаккаунтов:")
-            # for i in range(1, 11):
-            #     print(
-            #         f"  Суб{i}: opened={states[i]['opened']}, closed={states[i]['closed']}, active={states[i]['active']}")
-
-            next_sub = None
-            for i in range(1, 11):
-                if not states[i]['opened']:
-                    next_sub = i
-                    break
-
-            if next_sub is not None:
-                if last_activation_level is None:
-                    threshold = -DRAWDOWN_STEP * (wave + 1)
-                else:
-                    threshold = last_activation_level - DRAWDOWN_STEP
-                pct_to_next_sub = max(0.0, main_roi - threshold)
-                next_action = f"будет активирован субаккаунт {next_sub}"
-                next_threshold = threshold
-            else:
-                if last_activation_level is None:
-                    threshold = -DRAWDOWN_STEP * (wave + 1)
-                else:
-                    threshold = last_activation_level - DRAWDOWN_STEP
-                pct_to_next_sub = max(0.0, main_roi - threshold)
-                next_action = f"будет начата новая волна {wave + 1}"
-                next_threshold = threshold
-
-            if states[0]['opened'] and not states[0]['closed']:
-                pct_to_close_main = max(0.0, PROFIT_MAIN_CLOSE - main_roi)
-            else:
-                pct_to_close_main = None
-
-            sub_metrics = []
-            for i in range(1, 11):
-                if states[i]['opened'] and not states[i]['closed']:
-                    sub_bal = states[i]['last_balance']
-                    sub_base = states[i]['baseline']
-                    if sub_base is not None and sub_base > 0:
-                        sub_roi = (sub_bal - sub_base) / sub_base * 100
-                        pct_to_close = max(0.0, PROFIT_SUB_CLOSE_SELF - sub_roi)
-                        sub_metrics.append((i, sub_roi, pct_to_close))
-                    else:
-                        sub_metrics.append((i, None, None))
-                else:
-                    sub_metrics.append((i, None, None))
-
-            lines = []
-            target_roi_with_fees = GLOBAL_PROFIT_CLOSE + ESTIMATED_FEE_PERCENT
-            lines.append(
-                f"\nОбщий ROI: {total_roi:.2f}% | Цель: {target_roi_with_fees:.2f}% (чистыми {GLOBAL_PROFIT_CLOSE}%)")
-            if pct_to_close_main is not None:
-                lines.append(f"Основной ROI: {main_roi:.2f}% | до закрытия (вверх): {pct_to_close_main:.2f}%")
-            else:
-                lines.append(f"Основной ROI: {main_roi:.2f}% (закрыт)")
-
-            lines.append(f"До активации следующего уровня (вниз): {pct_to_next_sub:.2f}%")
-            lines.append(f"Следующий порог активации: {next_threshold:.2f}%")
-            if pct_to_next_sub == 0.0:
-                lines.append(f"   (Порог достигнут, {next_action}, волна {wave})")
-            else:
-                lines.append(f"   (Следующее событие: {next_action}, волна {wave})")
-
-            lines.append("Субаккаунты:")
-            for i, sub_roi, pct_to_close in sub_metrics:
-                if pct_to_close is not None and sub_roi is not None:
-                    wave_info = ""
-                    if states[i]['opened'] and not states[i]['closed']:
-                        sub_wave = states[i].get('wave', states[0].get('wave', 0))
-                        wave_info = f" (волна {sub_wave})"
-                    lines.append(f"  Суб{i}: ROI={sub_roi:.2f}%, до закрытия: {pct_to_close:.2f}%{wave_info}")
-                else:
-                    lines.append(f"  Суб{i}: не активен или закрыт")
-            print("\n".join(lines))
-            print("-" * 60)
-
-            # ---- ОСНОВНЫЕ УСЛОВИЯ ----
-            # Целевой ROI с учетом комиссий
-            target_roi_with_fees = GLOBAL_PROFIT_CLOSE + ESTIMATED_FEE_PERCENT
-
-            if total_roi >= target_roi_with_fees:
-                print(
-                    f"Достигнут общий ROI +{total_roi:.2f}% (цель {GLOBAL_PROFIT_CLOSE}% + {ESTIMATED_FEE_PERCENT}% комиссии). Закрываем все позиции.")
-                total_trades = 0
-                winning_trades = 0
-                losing_trades = 0
-                for idx, st in enumerate(states):
-                    if st['opened'] and not st['closed']:
-                        profit, trades, wins, losses = close_all_positions_safe(idx)
-                        st['closed'] = True
-                        total_trades += trades
-                        winning_trades += wins
-                        losing_trades += losses
-
-                # Сохраняем результат волны
-                wave_end_time = datetime.datetime.now()
-                log_wave_result(wave, wave_start_time.isoformat(), wave_end_time.isoformat(),
-                                wave_start_balance, current_total, total_trades, winning_trades, losing_trades,
-                                wave_max_drawdown, wave_max_profit)
-
-                save_cycle_state(states)
-                print_all_balances(states)
-
-                # Выводим аналитику
-                print_analytics()
-
-                clear_cycle()
-                print("Цикл завершён по глобальному ROI.")
-                break
-
-            if main_roi >= PROFIT_MAIN_CLOSE and not states[0]['closed']:
-                print(f"Основной аккаунт достиг +{PROFIT_MAIN_CLOSE}%. Закрываем его позиции.")
-                profit, trades, wins, losses = close_all_positions_safe(0)
-                states[0]['closed'] = True
-                save_cycle_state(states)
-                print_all_balances(states)
-                any_sub_open = any(st['opened'] and not st['closed'] for idx, st in enumerate(states) if 1 <= idx <= 10)
-                if not any_sub_open:
-                    # Сохраняем результат волны
-                    wave_end_time = datetime.datetime.now()
-                    log_wave_result(wave, wave_start_time.isoformat(), wave_end_time.isoformat(),
-                                    wave_start_balance, current_total, trades, wins, losses,
-                                    wave_max_drawdown, wave_max_profit)
-                    print_analytics()
-                    clear_cycle()
-                    print("Все позиции закрыты. Цикл завершён.")
-                    break
-                else:
-                    continue
-
-            # ---- ЗАКРЫВАЕМ ПРОФИТНЫЕ СУБАККАУНТЫ ----
-            for i in range(1, 11):
-                if not (states[i]['active'] and states[i]['opened'] and not states[i]['closed']):
-                    continue
-                sub_bal = states[i]['last_balance']
-                sub_base = states[i]['baseline']
-                if sub_base is None or sub_base == 0:
-                    continue
-                sub_roi = (sub_bal - sub_base) / sub_base * 100
-                if sub_roi >= PROFIT_SUB_CLOSE_SELF:
-                    print(f"Субаккаунт {i} закрывается: его собственный ROI достиг +{sub_roi:.2f}%")
-                    profit, trades, wins, losses = close_all_positions_safe(i)
-                    states[i]['closed'] = True
-                    states[i]['active'] = False
-                    states[i]['opened'] = False  # <-- ДОБАВИТЬ ЭТУ СТРОКУ
-                    states[i]['activation_level'] = 0.0  # <-- ДОБАВИТЬ ЭТУ СТРОКУ
-                    save_cycle_state(states)
-
-                    max_open_idx = 0
-                    for j in range(1, 11):
-                        if states[j]['opened'] and not states[j]['closed']:
-                            max_open_idx = j
-
-                    if max_open_idx > 0:
-                        last_activation_level = states[max_open_idx]['activation_level']
-                        save_cycle_info('last_activation_level', last_activation_level)
-                        print(
-                            f"Обновлён last_activation_level на {last_activation_level:.2f}% (уровень активации субаккаунта {max_open_idx})")
-                    else:
-                        last_activation_level = wave_start_level
-                        save_cycle_info('last_activation_level', last_activation_level)
-                        print(
-                            f"Все субаккаунты закрыты. last_activation_level восстановлен до {last_activation_level:.2f}% (уровень начала волны)")
-            # ---- АКТИВАЦИЯ НОВЫХ УРОВНЕЙ И ВОЛН ----
-            if not states[0]['closed']:
-                all_subs_opened = all(st['opened'] for idx, st in enumerate(states) if 1 <= idx <= 10)
-
-                if all_subs_opened:
-                    if last_activation_level is not None:
-                        if main_roi <= last_activation_level - DRAWDOWN_STEP:
-                            wave += 1
-                            states[0]['wave'] = wave
-
-                            # Сохраняем результат предыдущей волны
-                            wave_end_time = datetime.datetime.now()
-                            log_wave_result(wave - 1, wave_start_time.isoformat(), wave_end_time.isoformat(),
-                                            wave_start_balance, current_total, 0, 0, 0,
-                                            wave_max_drawdown, wave_max_profit)
-
-                            wave_start_balance = current_total
-                            wave_start_time = datetime.datetime.now()
-                            wave_max_profit = 0
-                            wave_max_drawdown = 0
-
-                            print(f"Начинаем волну {wave}: открываем новые позиции на всех аккаунтах...")
-
-                            db_positions = load_positions()
-
-                            print(f"Открываем позиции на основном аккаунте для волны {wave}...")
-                            for symbol, side, qty in db_positions:
-                                if symbol in leverages:
-                                    place_order_safe(0, symbol, side, qty, leverages[symbol])
-
-                            print(f"Открываем позиции на всех субаккаунтах для волны {wave}...")
-                            for idx in range(1, 11):
-                                if states[idx]['closed']:
-                                    states[idx]['closed'] = False
-                                    states[idx]['active'] = False
-                                    states[idx]['opened'] = False
-                                    states[idx]['activation_level'] = 0.0
-
-                                for symbol, side, qty in db_positions:
-                                    if symbol in leverages:
-                                        place_order_safe(idx, symbol, side, qty, leverages[symbol])
-
-                                states[idx]['active'] = True
-                                states[idx]['opened'] = True
-                                if states[idx]['activation_level'] == 0.0:
-                                    states[idx]['activation_level'] = main_roi
-                                states[idx]['wave'] = wave
-
-                            last_activation_level = main_roi
-                            wave_start_level = main_roi
-                            save_cycle_info('last_activation_level', last_activation_level)
-                            save_cycle_info('wave_start_level', wave_start_level)
-                            save_cycle_state(states)
-                            continue
-                else:
-                    for i in range(1, 11):
-                        if not states[i]['opened']:
-                            if last_activation_level is None:
-                                threshold = -DRAWDOWN_STEP * (wave + 1)
-                            else:
-                                threshold = last_activation_level - DRAWDOWN_STEP
-                            if main_roi <= threshold:
-                                if last_activation_level is not None:
-                                    step_from = last_activation_level
-                                    print(
-                                        f"Активация субаккаунта {i} при просадке {main_roi:.1f}% (шаг от {step_from:.1f}%)")
-                                else:
-                                    print(
-                                        f"Активация субаккаунта {i} при просадке {main_roi:.1f}% (начало волны {wave})")
-                                states[i]['active'] = True
-                                db_positions = load_positions()
-                                for symbol, side, qty in db_positions:
-                                    if symbol in leverages:
-                                        place_order_safe(i, symbol, side, qty, leverages[symbol])
-                                states[i]['opened'] = True
-                                states[i]['activation_level'] = main_roi
-                                states[i]['wave'] = wave
-                                states[i]['closed'] = False
-                                save_cycle_state(states)
-                                last_activation_level = main_roi
-                                save_cycle_info('last_activation_level', last_activation_level)
-                                print_all_balances(states)
-                                break
-
-            if states[0]['closed']:
-                any_sub_open = any(st['opened'] for idx, st in enumerate(states) if 1 <= idx <= 10)
-                if not any_sub_open:
-                    wave_end_time = datetime.datetime.now()
-                    log_wave_result(wave, wave_start_time.isoformat(), wave_end_time.isoformat(),
-                                    wave_start_balance, current_total, 0, 0, 0,
-                                    wave_max_drawdown, wave_max_profit)
-                    print_analytics()
-                    clear_cycle()
-                    print("Все позиции закрыты. Цикл завершён.")
-                    break
-
-        print("Ожидание нового сигнала...")
 
 def main():
     init_db()
@@ -2608,7 +2098,7 @@ def main():
                     lines.append(f"  Суб{i}: ROI={sub_roi:.2f}%, до закрытия: {pct_to_close:.2f}%{wave_info}")
                 else:
                     pass
-                    #lines.append(f"  Суб{i}: не активен или закрыт")
+                    # lines.append(f"  Суб{i}: не активен или закрыт")
             print("\n".join(lines))
             print("-" * 60)
 
@@ -2804,6 +2294,7 @@ def main():
                     break
 
         print("Ожидание нового сигнала...")
+
 
 if __name__ == "__main__":
     main()
