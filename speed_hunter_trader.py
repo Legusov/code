@@ -173,12 +173,35 @@ def closed_pnl(sess: HTTP, symbol: str, entry_ms: int) -> dict[str, Any] | None:
         category=CATEGORY, symbol=symbol, startTime=entry_ms, limit=50
     ), "get_closed_pnl")
     candidates = [p for p in response["result"]["list"] if int(p.get("updatedTime") or p.get("createdTime") or 0) >= entry_ms - 120_000]
-    return max(candidates, key=lambda p: int(p.get("updatedTime") or p.get("createdTime") or 0)) if candidates else None
+    if candidates:
+        return max(candidates, key=lambda p: int(p.get("updatedTime") or p.get("createdTime") or 0))
+
+    # Some demo-account responses expose the fill immediately in executions,
+    # while get_closed_pnl is delayed. Aggregate close fills as a fallback.
+    executions = check(sess.get_executions(
+        category=CATEGORY, symbol=symbol, startTime=entry_ms, limit=100
+    ), "get_executions")["result"]["list"]
+    executions = [e for e in executions if int(e.get("execTime") or 0) >= entry_ms - 120_000]
+    if not executions:
+        return None
+    qty = sum(float(e.get("execQty") or 0) for e in executions)
+    weighted_price = sum(float(e.get("execPrice") or 0) * float(e.get("execQty") or 0) for e in executions)
+    return {
+        "updatedTime": max(int(e.get("execTime") or 0) for e in executions),
+        "avgExitPrice": weighted_price / qty if qty else None,
+        "closedPnl": sum(float(e.get("closedPnl") or 0) for e in executions),
+        "source": "execution_list",
+        "executions": executions,
+    }
 
 
 def reconcile(sess: HTTP, journal: Journal, live: dict[str, dict[int, dict[str, Any]]]) -> None:
     for row in journal.open_rows():
-        if row["symbol"] in live:
+        # In hedge mode a symbol may have two independent legs. A closed
+        # Long/Short leg must be reconciled even if the opposite leg remains open.
+        position_idx = int(row["position_idx"])
+        live_leg = live.get(row["symbol"], {}).get(position_idx)
+        if live_leg:
             continue
         payload = closed_pnl(sess, row["symbol"], row["entry_time_ms"])
         if not payload:
