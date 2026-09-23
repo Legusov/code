@@ -149,26 +149,16 @@ def rules(sess: HTTP, symbol: str) -> tuple[Decimal, Decimal, Decimal]:
 
 
 def positions(sess: HTTP) -> dict[str, dict[int, dict[str, Any]]]:
+    response = check(sess.get_positions(category=CATEGORY, settleCoin=SETTLE_COIN), "get_positions")
     result: dict[str, dict[int, dict[str, Any]]] = {}
-    cursor = None
-    while True:
-        params = {"category": CATEGORY, "settleCoin": SETTLE_COIN, "limit": 200}
-        if cursor:
-            params["cursor"] = cursor
-        response = check(sess.get_positions(**params), "get_positions")
-        for p in response["result"]["list"]:
-            if Decimal(str(p.get("size", "0"))) > 0:
-                result.setdefault(p["symbol"], {})[int(p.get("positionIdx", 0))] = p
-        cursor = response["result"].get("nextPageCursor")
-        if not cursor:
-            break
+    for p in response["result"]["list"]:
+        if Decimal(str(p.get("size", "0"))) > 0:
+            result.setdefault(p["symbol"], {})[int(p.get("positionIdx", 0))] = p
     return result
 
 
 def closed_pnl(sess: HTTP, symbol: str, entry_ms: int) -> dict[str, Any] | None:
-    response = check(sess.get_closed_pnl(
-        category=CATEGORY, symbol=symbol, startTime=entry_ms, limit=50
-    ), "get_closed_pnl")
+    response = check(sess.get_closed_pnl(category=CATEGORY, symbol=symbol, limit=50), "get_closed_pnl")
     candidates = [p for p in response["result"]["list"] if int(p.get("updatedTime") or p.get("createdTime") or 0) >= entry_ms - 120_000]
     return max(candidates, key=lambda p: int(p.get("updatedTime") or p.get("createdTime") or 0)) if candidates else None
 
@@ -256,14 +246,9 @@ def run_once(sess: HTTP, journal: Journal, symbols: list[str], disabled: set[str
                 occupied.add(symbol)
         except Exception as exc:
             text = str(exc)
-            if (
-                "110125" in text
-                or "110126" in text
-                or "Crude Oil Trading Terms" in text
-                or "sign the required agreement" in text
-            ):
+            if "110126" in text or "sign the required agreement" in text:
                 disabled.add(symbol)
-                journal.disable_symbol(symbol, f"Bybit contract agreement required: {text[:180]}")
+                journal.disable_symbol(symbol, "Bybit 110126: required agreement before trading")
                 log.error("DISABLED %s: Bybit requires the account agreement for this contract", symbol)
             else:
                 log.exception("Processing failed for %s", symbol)
