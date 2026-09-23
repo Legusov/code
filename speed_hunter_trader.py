@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from decimal import Decimal, ROUND_DOWN
@@ -15,6 +16,7 @@ from typing import Any
 from pybit.unified_trading import HTTP
 from api_conf_all import DEMO_CONFIG
 from speed_hunter import signal
+from adaptive_filter import CandleStore, daily_reoptimize, load_active, apply_params
 
 CATEGORY = "linear"
 SETTLE_COIN = "USDT"
@@ -24,6 +26,7 @@ NOTIONAL_USDT = Decimal(os.getenv("POSITION_NOTIONAL_USDT", "10"))
 TP_SL_PCT = Decimal(os.getenv("TP_SL_PCT", "0.10"))
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "60"))
 ORDER_TAG = os.getenv("ORDER_TAG", "speed")
+FILTER_OPT_DB = Path(os.getenv("FILTER_OPT_DB", "filter_optimizer.sqlite3"))
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("speed-hunter-trader")
@@ -149,16 +152,26 @@ def rules(sess: HTTP, symbol: str) -> tuple[Decimal, Decimal, Decimal]:
 
 
 def positions(sess: HTTP) -> dict[str, dict[int, dict[str, Any]]]:
-    response = check(sess.get_positions(category=CATEGORY, settleCoin=SETTLE_COIN), "get_positions")
     result: dict[str, dict[int, dict[str, Any]]] = {}
-    for p in response["result"]["list"]:
-        if Decimal(str(p.get("size", "0"))) > 0:
-            result.setdefault(p["symbol"], {})[int(p.get("positionIdx", 0))] = p
+    cursor = None
+    while True:
+        params = {"category": CATEGORY, "settleCoin": SETTLE_COIN, "limit": 200}
+        if cursor:
+            params["cursor"] = cursor
+        response = check(sess.get_positions(**params), "get_positions")
+        for p in response["result"]["list"]:
+            if Decimal(str(p.get("size", "0"))) > 0:
+                result.setdefault(p["symbol"], {})[int(p.get("positionIdx", 0))] = p
+        cursor = response["result"].get("nextPageCursor")
+        if not cursor:
+            break
     return result
 
 
 def closed_pnl(sess: HTTP, symbol: str, entry_ms: int) -> dict[str, Any] | None:
-    response = check(sess.get_closed_pnl(category=CATEGORY, symbol=symbol, limit=50), "get_closed_pnl")
+    response = check(sess.get_closed_pnl(
+        category=CATEGORY, symbol=symbol, startTime=entry_ms, limit=50
+    ), "get_closed_pnl")
     candidates = [p for p in response["result"]["list"] if int(p.get("updatedTime") or p.get("createdTime") or 0) >= entry_ms - 120_000]
     return max(candidates, key=lambda p: int(p.get("updatedTime") or p.get("createdTime") or 0)) if candidates else None
 
@@ -246,12 +259,37 @@ def run_once(sess: HTTP, journal: Journal, symbols: list[str], disabled: set[str
                 occupied.add(symbol)
         except Exception as exc:
             text = str(exc)
-            if "110126" in text or "sign the required agreement" in text:
+            if (
+                "110125" in text
+                or "110126" in text
+                or "Crude Oil Trading Terms" in text
+                or "sign the required agreement" in text
+            ):
                 disabled.add(symbol)
-                journal.disable_symbol(symbol, "Bybit 110126: required agreement before trading")
+                journal.disable_symbol(symbol, f"Bybit contract agreement required: {text[:180]}")
                 log.error("DISABLED %s: Bybit requires the account agreement for this contract", symbol)
             else:
                 log.exception("Processing failed for %s", symbol)
+
+
+def optimizer_worker(symbols: list[str]) -> None:
+    """Refresh the 7-day candle cache and optimize the filter once per UTC day."""
+    store = CandleStore(FILTER_OPT_DB)
+    active = load_active(store)
+    if active:
+        apply_params(active)
+        log.info("Loaded saved filter parameters: %s", active.as_dict())
+    while True:
+        try:
+            result = daily_reoptimize(create_demo_session(), symbols, store)
+            if result:
+                params, stats = result
+                log.info("Daily filter update: params=%s stats=%s", params.as_dict(), stats)
+        except Exception:
+            log.exception("Daily filter optimization failed; existing parameters remain active")
+        now = time.time()
+        next_utc_day = (int(now) // 86400 + 1) * 86400
+        time.sleep(max(60.0, next_utc_day - now + 5.0))
 
 
 def main() -> None:
@@ -261,6 +299,7 @@ def main() -> None:
     disabled = journal.disabled_symbols()
     if disabled:
         log.warning("Disabled symbols loaded from SQLite: %s", ", ".join(sorted(disabled)))
+    threading.Thread(target=optimizer_worker, args=(symbols,), name="daily-filter-optimizer", daemon=True).start()
     log.info("Started: symbols=%d notional=$%s TP/SL=%s%% poll=%ss", len(symbols), NOTIONAL_USDT, TP_SL_PCT * 100, POLL_SECONDS)
     while True:
         started = time.monotonic()
