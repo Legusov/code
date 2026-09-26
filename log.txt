@@ -1,0 +1,280 @@
+C:\Users\PRO\PycharmProjects\spread_hunter\.venv\Scripts\python.exe C:\Users\PRO\Downloads\speed_hunter_trader.py 
+2026-09-26 18:53:28,943 INFO Bybit session: demo=True testnet=False
+2026-09-26 18:53:30,726 WARNING Disabled symbols loaded from SQLite: ARKKUSDT, BITOUSDT, BZUSDT, CLUSDT, CONLUSDT, CSOPSAMSUNG2LUSDT, CSOPSKHYNIX2LUSDT, DRAMUSDT, EWJUSDT, EWTUSDT, EWYUSDT, EWZUSDT, GBPUSDUSDT, GDXUSDT, IBITUSDT, INTWUSDT, IWMUSDT, KODEX200USDT, KORUUSDT, KSTRUSDT, LYTEUSDT, MAGSUSDT
+2026-09-26 18:53:30,727 INFO Started: symbols=231 notional=$10.631102635 TP/SL=10.0% cycle ROI=+1.00% initial cycle balance=$200 poll=60s
+2026-09-26 18:53:30,727 INFO ROI close retries=3 retry_delay=3.0s post-close entry pause=300s
+2026-09-26 18:53:30,730 INFO Loaded saved filter parameters: {'EMA_GAP_ATR': 0.3, 'RSI_LONG_MIN': 50.0, 'RSI_SHORT_MAX': 40.0, 'CLOSE_EXTREME': 0.3}
+212.6220527 215.705482651210
+212.41178763 215.705215332730
+212.66767444 215.705367436055
+2026-09-26 18:55:34,785 INFO OPENED 1000BONKUSDT Long idx=1 qty=2800.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.0041210 SL=0.0033720
+2026-09-26 18:55:37,458 INFO OPENED 1000PEPEUSDT Long idx=1 qty=2300.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.0049040 SL=0.0040130
+2026-09-26 18:55:40,700 INFO OPENED ADAUSDT Long idx=1 qty=40.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.2861 SL=0.2340
+2026-09-26 18:55:43,318 INFO OPENED ALGOUSDT Long idx=1 qty=87.2 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.13404 SL=0.10967
+2026-09-26 18:55:46,141 INFO OPENED APEUSDT Long idx=1 qty=66.9 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.17475 SL=0.14298
+2026-09-26 18:55:49,394 INFO OPENED APTUSDT Long idx=1 qty=12.07 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.9681 SL=0.7920
+2026-09-26 18:55:51,746 INFO OPENED ARBUSDT Long idx=1 qty=46.3 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.25204 SL=0.20621
+2026-09-26 18:55:55,031 INFO OPENED ARKUSDT Short idx=2 qty=40.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.23779 SL=0.29064
+2026-09-26 18:55:58,573 INFO OPENED ASTERUSDT Long idx=1 qty=14.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.8101 SL=0.6628
+2026-09-26 18:56:01,009 INFO OPENED ATOMUSDT Long idx=1 qty=5.6 notional=10.631102635 (base=10.631102635 + bank=0) TP=2.0640 SL=1.6890
+2026-09-26 18:56:04,639 INFO OPENED AVAAIUSDT Long idx=1 qty=1073.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.010894 SL=0.008913
+2026-09-26 18:56:09,357 INFO OPENED BLURUSDT Long idx=1 qty=496.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.023559 SL=0.019276
+2026-09-26 18:56:12,306 INFO OPENED BOMEUSDT Long idx=1 qty=10100.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.0011565 SL=0.0009462
+2026-09-26 18:56:14,084 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+2026-09-26 18:56:17,872 INFO OPENED CELOUSDT Long idx=1 qty=107.9 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.10832 SL=0.08863
+2026-09-26 18:56:20,811 INFO OPENED CHZUSDT Long idx=1 qty=626.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.01866 SL=0.01527
+2026-09-26 18:56:24,958 INFO OPENED DEEPUSDT Long idx=1 qty=460.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.02530 SL=0.02070
+2026-09-26 18:56:27,869 INFO OPENED DOGEUSDT Long idx=1 qty=107.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.10840 SL=0.08869
+2026-09-26 18:56:32,004 INFO OPENED ENSUSDT Long idx=1 qty=1.4 notional=10.631102635 (base=10.631102635 + bank=0) TP=7.865 SL=6.435
+2026-09-26 18:56:33,521 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+2026-09-26 18:56:36,446 INFO OPENED FILUSDT Long idx=1 qty=8.8 notional=10.631102635 (base=10.631102635 + bank=0) TP=1.3175 SL=1.0780
+2026-09-26 18:56:39,211 INFO OPENED FLRUSDT Long idx=1 qty=1440.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.008119 SL=0.006642
+2026-09-26 18:56:42,811 INFO OPENED GASUSDT Long idx=1 qty=6.9 notional=10.631102635 (base=10.631102635 + bank=0) TP=1.6935 SL=1.3856
+2026-09-26 18:56:46,637 INFO OPENED GRAMUSDT Long idx=1 qty=7.1 notional=10.631102635 (base=10.631102635 + bank=0) TP=1.6340 SL=1.3370
+2026-09-26 18:56:49,845 INFO OPENED GRTUSDT Long idx=1 qty=378.8 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.03086 SL=0.02525
+2026-09-26 18:56:53,154 INFO OPENED HBARUSDT Long idx=1 qty=111.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.10470 SL=0.08567
+2026-09-26 18:56:56,457 INFO OPENED HYPERUSDT Long idx=1 qty=138.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.08429 SL=0.06896
+2026-09-26 18:56:58,839 INFO OPENED HYPEUSDT Long idx=1 qty=0.11 notional=10.631102635 (base=10.631102635 + bank=0) TP=101.700 SL=83.210
+2026-09-26 18:57:01,422 INFO OPENED ICPUSDT Long idx=1 qty=3.2 notional=10.631102635 (base=10.631102635 + bank=0) TP=3.636 SL=2.975
+2026-09-26 18:57:05,002 INFO OPENED KASUSDT Long idx=1 qty=220.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.05272 SL=0.04313
+2026-09-26 18:57:07,763 INFO OPENED KAVAUSDT Long idx=1 qty=155.8 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.07503 SL=0.06138
+2026-09-26 18:57:10,769 INFO OPENED KSMUSDT Long idx=1 qty=2.19 notional=10.631102635 (base=10.631102635 + bank=0) TP=5.327 SL=4.358
+2026-09-26 18:57:15,409 INFO OPENED MAVUSDT Long idx=1 qty=845.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.013829 SL=0.011314
+2026-09-26 18:57:18,663 INFO OPENED MEMEUSDT Long idx=1 qty=16290.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.0007178 SL=0.0005873
+2026-09-26 18:57:21,646 INFO OPENED MIRAUSDT Long idx=1 qty=186.3 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.06276 SL=0.05135
+2026-09-26 18:57:24,304 INFO OPENED MMTUSDT Long idx=1 qty=60.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.19180 SL=0.15690
+212.73705716 215.902428599200
+2026-09-26 18:57:32,286 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+2026-09-26 18:57:38,043 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+212.55391129 215.902464828745
+2026-09-26 18:58:32,284 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+2026-09-26 18:58:37,370 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+213.06165861 215.902635445565
+2026-09-26 18:59:32,447 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+2026-09-26 18:59:37,272 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+213.24954545 215.902804618965
+2026-09-26 19:00:30,860 INFO OPENED ANKRUSDT Long idx=1 qty=2036.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.005742 SL=0.004698
+2026-09-26 19:00:35,167 INFO OPENED BCHUSDT Long idx=1 qty=0.03 notional=10.631102635 (base=10.631102635 + bank=0) TP=369.20 SL=302.10
+2026-09-26 19:00:37,512 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+2026-09-26 19:00:41,029 INFO OPENED CFXUSDT Long idx=1 qty=187.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.06226 SL=0.05094
+2026-09-26 19:00:43,967 INFO OPENED CHILLGUYUSDT Long idx=1 qty=756.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.015449 SL=0.012640
+2026-09-26 19:00:46,892 INFO OPENED CKBUSDT Long idx=1 qty=7270.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.0016073 SL=0.0013150
+2026-09-26 19:00:49,415 INFO OPENED COOKIEUSDT Long idx=1 qty=828.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.014113 SL=0.011547
+2026-09-26 19:00:52,098 INFO OPENED CTCUSDT Long idx=1 qty=89.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.13114 SL=0.10729
+2026-09-26 19:00:55,152 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+2026-09-26 19:00:58,043 INFO OPENED FLUIDUSDT Long idx=1 qty=7.2 notional=10.631102635 (base=10.631102635 + bank=0) TP=1.6100 SL=1.3173
+2026-09-26 19:01:00,495 INFO OPENED FLUXUSDT Long idx=1 qty=143.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.08121 SL=0.06644
+2026-09-26 19:01:03,697 INFO OPENED FUSDT Long idx=1 qty=2739.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.004269 SL=0.003492
+2026-09-26 19:01:06,162 INFO OPENED GMTUSDT Long idx=1 qty=1189.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.009831 SL=0.008044
+2026-09-26 19:01:08,878 INFO OPENED GOATUSDT Long idx=1 qty=531.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.022010 SL=0.018000
+2026-09-26 19:01:11,563 INFO OPENED GRIFFAINUSDT Long idx=1 qty=597.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.019558 SL=0.016002
+2026-09-26 19:01:14,356 INFO OPENED GUNUSDT Long idx=1 qty=3252.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.003595 SL=0.002942
+2026-09-26 19:01:17,758 INFO OPENED HMSTRUSDT Long idx=1 qty=58310.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.0002005 SL=0.0001640
+2026-09-26 19:01:20,922 INFO OPENED IOTXUSDT Long idx=1 qty=2911.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.004017 SL=0.003286
+2026-09-26 19:01:24,575 INFO OPENED LAUSDT Long idx=1 qty=141.7 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.08252 SL=0.06751
+213.50016608 216.001931932635
+2026-09-26 19:01:33,992 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+2026-09-26 19:01:38,159 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+213.49984585 216.001962406375
+2026-09-26 19:02:33,128 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+2026-09-26 19:02:36,845 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+212.25009211 216.001173499520
+2026-09-26 19:03:33,508 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+2026-09-26 19:03:38,268 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+212.16800935 216.001189387150
+2026-09-26 19:04:33,701 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+2026-09-26 19:04:37,446 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+211.58218393 216.000908585145
+2026-09-26 19:05:31,963 INFO OPENED 1000TOSHIUSDT Long idx=1 qty=79.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.14610 SL=0.11960
+2026-09-26 19:05:35,137 INFO OPENED 2ZUSDT Short idx=2 qty=152.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.06289 SL=0.07686
+2026-09-26 19:05:39,458 INFO OPENED B3USDT Long idx=1 qty=13000.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.0008972 SL=0.0007341
+2026-09-26 19:05:43,145 INFO OPENED BRETTUSDT Long idx=1 qty=1760.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.006608 SL=0.005407
+2026-09-26 19:05:44,731 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+2026-09-26 19:05:48,513 INFO OPENED CCUSDT Long idx=1 qty=76.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.15284 SL=0.12505
+2026-09-26 19:05:52,208 INFO OPENED ENSOUSDT Long idx=1 qty=10.1 notional=10.631102635 (base=10.631102635 + bank=0) TP=1.1506 SL=0.9414
+2026-09-26 19:05:55,956 INFO OPENED HIVEUSDT Long idx=1 qty=177.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.06597 SL=0.05398
+2026-09-26 19:06:01,081 INFO OPENED MEWUSDT Long idx=1 qty=20600.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.0005661 SL=0.0004632
+211.44009398 216.047353135605
+2026-09-26 19:06:32,752 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+211.45133317 216.047349490920
+2026-09-26 19:07:32,691 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+211.86687159 216.047641073145
+2026-09-26 19:08:32,405 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+212.48908688 216.047897997120
+2026-09-26 19:09:32,880 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+213.25030541 216.048221510970
+2026-09-26 19:10:32,507 INFO OPENED AUSDT Long idx=1 qty=103.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.11317 SL=0.09260
+2026-09-26 19:10:35,854 INFO OPENED BIOUSDT Long idx=1 qty=324.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.03603 SL=0.02948
+2026-09-26 19:10:39,898 INFO OPENED DASHUSDT Long idx=1 qty=0.14 notional=10.631102635 (base=10.631102635 + bank=0) TP=79.07 SL=64.70
+2026-09-26 19:10:42,534 INFO OPENED EDGEUSDT Long idx=1 qty=17.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.6730 SL=0.5507
+2026-09-26 19:10:45,220 INFO OPENED EGLDUSDT Long idx=1 qty=2.23 notional=10.631102635 (base=10.631102635 + bank=0) TP=5.221 SL=4.272
+2026-09-26 19:10:46,708 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+2026-09-26 19:10:49,609 INFO OPENED FOGOUSDT Short idx=2 qty=1650.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.005785 SL=0.007070
+2026-09-26 19:10:52,447 INFO OPENED IOTAUSDT Long idx=1 qty=204.4 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.05720 SL=0.04680
+2026-09-26 19:10:56,586 INFO OPENED LITUSDT Long idx=1 qty=2.1 notional=10.631102635 (base=10.631102635 + bank=0) TP=5.3160 SL=4.3490
+213.26061778 216.093957905850
+2026-09-26 19:11:34,213 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+213.7674227 216.094049107125
+2026-09-26 19:12:33,815 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+213.50764535 216.093964782555
+2026-09-26 19:13:33,636 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+212.39638238 216.093360883600
+2026-09-26 19:14:33,744 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+212.21534786 216.093320279520
+2026-09-26 19:15:32,282 INFO OPENED APEXUSDT Long idx=1 qty=39.8 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.2932 SL=0.2399
+2026-09-26 19:15:37,002 INFO OPENED CATIUSDT Long idx=1 qty=162.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.07183 SL=0.05877
+2026-09-26 19:15:39,748 INFO OPENED COTIUSDT Short idx=2 qty=685.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.013962 SL=0.017065
+2026-09-26 19:15:44,434 INFO OPENED LRCUSDT Long idx=1 qty=1064.1 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.010980 SL=0.008990
+2026-09-26 19:15:47,521 INFO OPENED MEGAUSDT Long idx=1 qty=230.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.05074 SL=0.04151
+212.3887848 216.122600307110
+212.54264435 216.122713861760
+212.97579069 216.123003878245
+2026-09-26 19:19:27,932 INFO SL bank updated for HUMAUSDT: +21.290415917 (2 × notional 10.6452079585)
+2026-09-26 19:19:27,932 INFO CLOSED HUMAUSDT Long status=SL pnl=-1.09866531
+213.26951958 216.118151377350
+214.00935321 216.118451053540
+2026-09-26 19:20:33,987 INFO OPENED DRIFTUSDT Long idx=1 qty=645.0 notional=12.7601442267 (base=10.631102635 + bank=2.1290415917) TP=0.021740 SL=0.017790
+2026-09-26 19:20:36,969 INFO OPENED FIDAUSDT Long idx=1 qty=561.0 notional=12.5472400675300002 (base=10.631102635 + bank=1.9161374325300002) TP=0.024590 SL=0.020120
+2026-09-26 19:20:40,628 INFO OPENED LTCUSDT Long idx=1 qty=0.1 notional=12.3556263242770002 (base=10.631102635 + bank=1.7245236892770002) TP=80.53 SL=65.88
+212.03851773 216.135098574155
+212.53519107 216.135585605205
+213.08743257 216.135949651525
+212.96681269 216.135945144330
+212.49963527 216.135586423275
+2026-09-26 19:25:33,327 INFO OPENED CAKEUSDT Short idx=2 qty=4.4 notional=12.1831739553493003 (base=10.631102635 + bank=1.5520713203493003) TP=2.4840 SL=3.0370
+2026-09-26 19:25:37,315 INFO OPENED KMNOUSDT Long idx=1 qty=240.0 notional=12.0279668233143702 (base=10.631102635 + bank=1.3968641883143702) TP=0.05500 SL=0.04500
+2026-09-26 19:25:40,215 INFO OPENED LQTYUSDT Long idx=1 qty=50.3 notional=11.8882804044829333 (base=10.631102635 + bank=1.2571777694829333) TP=0.2598 SL=0.2125
+2026-09-26 19:25:44,040 INFO OPENED MOCAUSDT Long idx=1 qty=1103.0 notional=11.76256262753464 (base=10.631102635 + bank=1.13145999253464) TP=0.011722 SL=0.009591
+213.15021565 216.162162324055
+213.41323374 216.162254196055
+213.18792266 216.162135171545
+214.150928 216.162622959395
+214.14739645 216.162650453620
+214.21897473 216.162792691100
+215.07806968 216.163344161800
+215.84331222 216.163769972625
+216.04826304 216.163828251890
+215.37333344 216.163391211550
+2026-09-26 19:35:31,442 INFO OPENED ARPAUSDT Long idx=1 qty=990.0 notional=11.6494166282811759 (base=10.631102635 + bank=1.0183139932811759) TP=0.012921 SL=0.010572
+2026-09-26 19:35:34,639 INFO OPENED AVAXUSDT Long idx=1 qty=0.9 notional=10.631102635 (base=10.631102635 + bank=0) TP=12.124 SL=9.919
+2026-09-26 19:35:37,091 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+2026-09-26 19:35:39,597 INFO OPENED ETHBTCUSDT Long idx=1 qty=330.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.035250 SL=0.028840
+2026-09-26 19:35:41,091 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+214.88453645 216.180876844440
+2026-09-26 19:36:31,305 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+2026-09-26 19:36:32,868 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+214.35843709 216.180576257065
+2026-09-26 19:37:31,421 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+2026-09-26 19:37:32,843 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+215.00460047 216.180974438200
+2026-09-26 19:38:31,624 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+2026-09-26 19:38:33,347 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+214.77083261 216.180788649630
+2026-09-26 19:39:31,906 WARNING SKIP BTCUSDT: qty 0.000 < minOrderQty 0.001
+2026-09-26 19:39:33,454 WARNING SKIP ETHUSDT: qty 0.00 < minOrderQty 0.01
+214.96879242 216.180807800135
+214.58317691 216.180477080955
+214.60740396 216.180443909465
+214.67454611 216.180390501605
+214.63658323 216.180378069570
+214.12394396 216.180168338730
+2026-09-26 19:45:32,496 INFO OPENED BBUSDT Long idx=1 qty=960.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.012172 SL=0.009959
+2026-09-26 19:45:36,331 INFO OPENED HUMAUSDT Short idx=2 qty=380.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.025140 SL=0.030730
+2026-09-26 19:45:40,256 INFO OPENED MONUSDT Long idx=1 qty=394.0 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.029610 SL=0.024220
+213.50456747 216.197440327585
+214.25954916 216.197795994270
+213.12430482 216.197166060515
+213.32247844 216.197277523900
+213.04208493 216.197177624430
+213.18344412 216.197214376420
+212.95930187 216.197048921075
+213.03694021 216.197101914895
+212.43301515 216.196737375830
+212.10863638 216.196552308310
+2026-09-26 19:55:33,171 INFO OPENED LINKUSDT Long idx=1 qty=0.7 notional=10.631102635 (base=10.631102635 + bank=0) TP=15.752 SL=12.888
+211.77107714 216.201949165270
+213.11045852 216.202728306765
+213.12931087 216.202762213715
+213.25004437 216.202669168180
+214.43550663 216.203398860495
+2026-09-26 20:00:33,854 INFO OPENED MNTUSDT Short idx=2 qty=15.2 notional=10.631102635 (base=10.631102635 + bank=0) TP=0.62590 SL=0.76500
+Traceback (most recent call last):
+  File "C:\Users\PRO\PycharmProjects\spread_hunter\.venv\Lib\site-packages\urllib3\connectionpool.py", line 534, in _make_request
+    response = conn.getresponse()
+               ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PRO\PycharmProjects\spread_hunter\.venv\Lib\site-packages\urllib3\connection.py", line 571, in getresponse
+    httplib_response = super().getresponse()
+                       ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PRO\AppData\Local\Programs\Python\Python312\Lib\http\client.py", line 1428, in getresponse
+    response.begin()
+  File "C:\Users\PRO\AppData\Local\Programs\Python\Python312\Lib\http\client.py", line 331, in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PRO\AppData\Local\Programs\Python\Python312\Lib\http\client.py", line 292, in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PRO\AppData\Local\Programs\Python\Python312\Lib\socket.py", line 720, in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PRO\AppData\Local\Programs\Python\Python312\Lib\ssl.py", line 1251, in recv_into
+    return self.read(nbytes, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PRO\AppData\Local\Programs\Python\Python312\Lib\ssl.py", line 1103, in read
+    return self._sslobj.read(len, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TimeoutError: The read operation timed out
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\PRO\PycharmProjects\spread_hunter\.venv\Lib\site-packages\requests\adapters.py", line 644, in send
+    resp = conn.urlopen(
+           ^^^^^^^^^^^^^
+  File "C:\Users\PRO\PycharmProjects\spread_hunter\.venv\Lib\site-packages\urllib3\connectionpool.py", line 841, in urlopen
+    retries = retries.increment(
+              ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PRO\PycharmProjects\spread_hunter\.venv\Lib\site-packages\urllib3\util\retry.py", line 490, in increment
+    raise reraise(type(error), error, _stacktrace)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PRO\PycharmProjects\spread_hunter\.venv\Lib\site-packages\urllib3\util\util.py", line 39, in reraise
+    raise value
+  File "C:\Users\PRO\PycharmProjects\spread_hunter\.venv\Lib\site-packages\urllib3\connectionpool.py", line 787, in urlopen
+    response = self._make_request(
+               ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PRO\PycharmProjects\spread_hunter\.venv\Lib\site-packages\urllib3\connectionpool.py", line 536, in _make_request
+    self._raise_timeout(err=e, url=url, timeout_value=read_timeout)
+  File "C:\Users\PRO\PycharmProjects\spread_hunter\.venv\Lib\site-packages\urllib3\connectionpool.py", line 367, in _raise_timeout
+    raise ReadTimeoutError(
+urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='api-demo.bybit.com', port=443): Read timed out. (read timeout=20)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\PRO\Downloads\speed_hunter_trader.py", line 1010, in <module>
+    main()
+  File "C:\Users\PRO\Downloads\speed_hunter_trader.py", line 1005, in main
+    run_once(sess, journal, symbols, disabled)
+  File "C:\Users\PRO\Downloads\speed_hunter_trader.py", line 728, in run_once
+    live = positions(sess)
+           ^^^^^^^^^^^^^^^
+  File "C:\Users\PRO\Downloads\speed_hunter_trader.py", line 515, in positions
+    response = check(sess.get_positions(**params), "get_positions")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PRO\PycharmProjects\spread_hunter\.venv\Lib\site-packages\pybit\_v5_position.py", line 22, in get_positions
+    return self._submit_request(
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PRO\PycharmProjects\spread_hunter\.venv\Lib\site-packages\pybit\_http_manager.py", line 201, in _submit_request
+    self._handle_network_error(e, retries_attempted)
+  File "C:\Users\PRO\PycharmProjects\spread_hunter\.venv\Lib\site-packages\pybit\_http_manager.py", line 323, in _handle_network_error
+    raise error
+  File "C:\Users\PRO\PycharmProjects\spread_hunter\.venv\Lib\site-packages\pybit\_http_manager.py", line 194, in _submit_request
+    response = self.client.send(request, timeout=self.timeout)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PRO\PycharmProjects\spread_hunter\.venv\Lib\site-packages\requests\sessions.py", line 703, in send
+    r = adapter.send(request, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PRO\PycharmProjects\spread_hunter\.venv\Lib\site-packages\requests\adapters.py", line 690, in send
+    raise ReadTimeout(e, request=request)
+requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='api-demo.bybit.com', port=443): Read timed out. (read timeout=20)
+
+Process finished with exit code 1
