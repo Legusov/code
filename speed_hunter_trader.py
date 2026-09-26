@@ -31,6 +31,37 @@ import matplotlib.pyplot as plt
 
 import pandas as pd
 
+import struct
+import wave
+import tempfile
+
+SAMPLE_RATE = 44100
+BIT_DEPTH = 2  # 16-bit
+
+MAJOR = (523.25, 659.25, 783.99)
+MINOR = (523.25, 622.25, 783.99)
+
+def make_chord_wav(freqs, duration=0.4, volume=0.25, path=None):
+    if path is None:
+        fd, path = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+
+    n_samples = int(SAMPLE_RATE * duration)
+    with wave.open(path, "w") as w:
+        w.setnchannels(1)
+        w.setsampwidth(BIT_DEPTH)
+        w.setframerate(SAMPLE_RATE)
+        frames = bytearray()
+        for i in range(n_samples):
+            t = i / SAMPLE_RATE
+            # затухание в конце, чтобы не было щелчка
+            envelope = 1.0 - (i / n_samples) ** 2
+            sample = sum(math.sin(2 * math.pi * f * t) for f in freqs) / len(freqs)
+            value = int(sample * volume * envelope * 32767)
+            frames += struct.pack("<h", value)
+        w.writeframes(bytes(frames))
+    winsound.PlaySound(path, winsound.SND_FILENAME)
+    return path
 
 CATEGORY = "linear"
 SETTLE_COIN = "USDT"
@@ -38,7 +69,7 @@ SYMBOL_FILE = Path(os.getenv("SYMBOL_FILE", "sym.txt"))
 DB_PATH = Path(os.getenv("TRADER_DB", "bybit_signal_trader.sqlite3"))
 NOTIONAL_USDT = Decimal(os.getenv("POSITION_NOTIONAL_USDT", "10"))
 TP_SL_PCT = Decimal(os.getenv("TP_SL_PCT", "0.1"))
-ROI_TARGET_PCT = Decimal(os.getenv("ROI_TARGET_PCT", "0.02"))
+ROI_TARGET_PCT = Decimal(os.getenv("ROI_TARGET_PCT", "0.01"))
 DEMO_TAKER_FEE_RATE = Decimal(os.getenv(
     "DEMO_TAKER_FEE_RATE", str(DEMO_CONFIG.get("taker_fee_rate", "0.00055"))
 ))
@@ -213,9 +244,11 @@ class Journal:
 
         new_value = max(value + size, 0.0)
         if size > 0:
-            print(f"Плюсуем к банку: {size} теперь там: {new_value}")
+            pass
+            #print(f"Плюсуем к банку: {size} теперь там: {new_value}")
         else:
-            print(f"Минусуем из банка: {size} теперь там: {new_value}")
+            pass
+            #print(f"Минусуем из банка: {size} теперь там: {new_value}")
 
         owns_transaction = not self.db.in_transaction
         try:
@@ -553,6 +586,10 @@ def reconcile(sess: HTTP, journal: Journal, live: dict[str, dict[int, dict[str, 
         if abs(pnl) < 1e-12:
             log.warning("CLOSED %s %s status=%s with zero realized PnL; verify Bybit execution history", row["symbol"], row["side"], status)
         log.info("CLOSED %s %s status=%s pnl=%s", row["symbol"], row["side"], status, pnl)
+        # if pnl > 0:
+        #     make_chord_wav(MAJOR, duration=0.6) #MINOR
+        # else:
+        #     make_chord_wav(MINOR, duration=0.6)
 
 
 def wallet_equity(sess: HTTP) -> Decimal:
@@ -950,7 +987,7 @@ def main() -> None:
     sess = create_demo_session()
     equity = wallet_equity(sess)
     NOTIONAL_USDT = Decimal(os.getenv("POSITION_NOTIONAL_USDT", str(equity * Decimal("0.05"))))
-    print(equity, NOTIONAL_USDT)
+    #print(equity, NOTIONAL_USDT)
     journal = Journal(DB_PATH)
     symbols = load_symbols()
     disabled = journal.disabled_symbols()
