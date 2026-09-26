@@ -1,32 +1,60 @@
 #!/usr/bin/env python3
 """Bybit Demo Trading bot: 5m signal + hedge-mode order + TP/SL + SQLite journal."""
 from __future__ import annotations
-
+import winsound
 import ast
 import json
 import logging
+import math
 import os
 import sqlite3
 import threading
 import time
+import requests
+
+from datetime import datetime, timedelta
 from pathlib import Path
 from decimal import Decimal, ROUND_DOWN
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from pybit.unified_trading import HTTP
-from api_conf_all import DEMO_CONFIG
+from api_conf_all import DEMO_CONFIG, api_t, chat
 from speed_hunter import signal
 from adaptive_filter import CandleStore, daily_reoptimize, load_active, apply_params
+
+import matplotlib
+matplotlib.use("Agg", force=True)
+
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+
+import pandas as pd
+
 
 CATEGORY = "linear"
 SETTLE_COIN = "USDT"
 SYMBOL_FILE = Path(os.getenv("SYMBOL_FILE", "sym.txt"))
 DB_PATH = Path(os.getenv("TRADER_DB", "bybit_signal_trader.sqlite3"))
 NOTIONAL_USDT = Decimal(os.getenv("POSITION_NOTIONAL_USDT", "10"))
-TP_SL_PCT = Decimal(os.getenv("TP_SL_PCT", "0.10"))
+TP_SL_PCT = Decimal(os.getenv("TP_SL_PCT", "0.1"))
+ROI_TARGET_PCT = Decimal(os.getenv("ROI_TARGET_PCT", "0.02"))
+DEMO_TAKER_FEE_RATE = Decimal(os.getenv(
+    "DEMO_TAKER_FEE_RATE", str(DEMO_CONFIG.get("taker_fee_rate", "0.00055"))
+))
+INITIAL_CYCLE_BALANCE_USDT = Decimal("200")
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "60"))
+ENTRY_COOLDOWN_SECONDS = int(os.getenv("ENTRY_COOLDOWN_SECONDS", "300"))
 ORDER_TAG = os.getenv("ORDER_TAG", "speed")
 FILTER_OPT_DB = Path(os.getenv("FILTER_OPT_DB", "filter_optimizer.sqlite3"))
+OPTIMIZATION_HOUR_MSK = int(os.getenv("OPTIMIZATION_HOUR_MSK", "1"))
+MSK = ZoneInfo("Europe/Moscow")
+optimization_active = threading.Event()
+EXCLUDED_SYMBOLS = {
+    item.strip().upper()
+    for item in os.getenv("EXCLUDED_SYMBOLS", "BTCUSDT,ETHUSDT").split(",")
+    if item.strip()
+}
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("speed-hunter-trader")
@@ -57,17 +85,29 @@ def create_demo_session() -> HTTP:
 
 
 def load_symbols() -> list[str]:
+    global NOTIONAL_USDT
     value = ast.literal_eval(SYMBOL_FILE.read_text())
     if not isinstance(value, list):
         raise ValueError(f"Invalid symbol list: {SYMBOL_FILE}")
-    return [str(x).upper() for x in value]
-
+    symbols = [str(x).upper() for x in value]
+    if NOTIONAL_USDT <= Decimal("10"):
+        removed = [symbol for symbol in symbols if symbol in EXCLUDED_SYMBOLS]
+        symbols = [symbol for symbol in symbols if symbol not in EXCLUDED_SYMBOLS]
+        if removed:
+            log.info("Excluded for $%s notional: %s", NOTIONAL_USDT, ", ".join(removed))
+    return symbols
 
 class Journal:
     def __init__(self, path: Path):
         self.db = sqlite3.connect(path, timeout=30)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
+
+        self.db.execute("""CREATE TABLE IF NOT EXISTS bank
+                                            (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                            bank_all REAL NOT NULL DEFAULT 0.0
+                                            )""")
+
         self.db.execute("""
             CREATE TABLE IF NOT EXISTS positions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,10 +142,132 @@ class Journal:
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS trader_state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS wallet (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        self.db.execute(
+            "INSERT OR IGNORE INTO trader_state(key, value) VALUES ('cycle_start_balance', ?)",
+            (str(INITIAL_CYCLE_BALANCE_USDT),),
+        )
+
+        # The bank is a singleton row. Do not use DEFAULT VALUES here: with
+        # AUTOINCREMENT that creates id=2, id=3, ... on every bot restart.
+        self.db.execute("INSERT OR IGNORE INTO bank(id, bank_all) VALUES (1, 0.0)")
+        self.db.execute("""
+            CREATE TRIGGER IF NOT EXISTS bank_only_id_one
+            BEFORE INSERT ON bank
+            WHEN NEW.id != 1
+            BEGIN
+                SELECT RAISE(ABORT, 'bank table only allows id=1');
+            END
+        """)
+
         self.db.commit()
+
+    def bank_all(self) -> float:
+        row = self.db.execute("SELECT bank_all FROM bank WHERE id = 1").fetchone()
+        return float(row[0]) if row else 0.0
+
+    def bank_info(self, size: float | None = None) -> int | None:
+        """Read/adjust the SL bank; participate in an existing close transaction."""
+        row = self.db.execute("SELECT bank_all FROM bank WHERE id = 1").fetchone()
+        if row is None:
+            raise RuntimeError("Bank row id=1 is missing")
+        value = float(row[0])
+
+        if size is None or size == 0:
+            return max(math.ceil(value / 10), 1)
+
+        new_value = max(value + size, 0.0)
+        if size > 0:
+            print(f"Плюсуем к банку: {size} теперь там: {new_value}")
+        else:
+            print(f"Минусуем из банка: {size} теперь там: {new_value}")
+
+        owns_transaction = not self.db.in_transaction
+        try:
+            self.db.execute("UPDATE bank SET bank_all = ? WHERE id = 1", (new_value,))
+            if owns_transaction:
+                self.db.commit()
+        except Exception:
+            if owns_transaction:
+                self.db.rollback()
+            raise
+        return None
+
+    def state(self, key: str, default: str | None = None) -> str | None:
+        row = self.db.execute("SELECT value FROM trader_state WHERE key=?", (key,)).fetchone()
+        return row[0] if row else default
+
+    def set_state(self, key: str, value: str) -> None:
+        self.db.execute(
+            "INSERT INTO trader_state(key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP",
+            (key, value),
+        )
+        self.db.commit()
+
+    def record_wallet_equity(self, equity: Decimal) -> None:
+        """Append one balance snapshot to the wallet history table."""
+        self.db.execute(
+            "INSERT INTO wallet (value, updated_at) VALUES (?, CURRENT_TIMESTAMP)",
+            (str(equity),),
+        )
+        self.db.commit()
+
+    def start_roi_close(self) -> None:
+        winsound.Beep(500, 500)
+        # Keep positions OPEN until Bybit confirms closure; this marker lets
+        # delayed PnL reconciliation preserve the ROI reason.
+        self.db.execute("UPDATE positions SET close_status='ROI' WHERE status='OPEN'")
+        self.db.execute(
+            "INSERT INTO trader_state(key, value, updated_at) VALUES ('roi_close_pending', '1', CURRENT_TIMESTAMP) "
+            "ON CONFLICT(key) DO UPDATE SET value='1', updated_at=CURRENT_TIMESTAMP"
+        )
+        self.db.commit()
+
+    def finish_cycle(self, balance: Decimal) -> None:
+        winsound.MessageBeep(winsound.MB_ICONHAND)
+        self.db.execute("BEGIN IMMEDIATE")
+        self.db.execute(
+            "INSERT INTO trader_state(key, value, updated_at) VALUES ('cycle_start_balance', ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP",
+            (str(balance),),
+        )
+        self.db.execute(
+            "INSERT INTO trader_state(key, value, updated_at) VALUES ('roi_close_pending', '0', CURRENT_TIMESTAMP) "
+            "ON CONFLICT(key) DO UPDATE SET value='0', updated_at=CURRENT_TIMESTAMP"
+        )
+        # The loss bank is consumed/reset only after all ROI-cycle positions
+        # have been confirmed closed by manage_roi_cycle.
+        self.db.execute("UPDATE bank SET bank_all = 0 WHERE id = 1")
+        self.db.commit()
+
+        winsound.Beep(500, 500)
 
     def open_symbols(self) -> set[str]:
         rows = self.db.execute("SELECT DISTINCT symbol FROM positions WHERE status='OPEN'").fetchall()
+        return {r[0] for r in rows}
+
+    def cooldown_symbols(self, now_ms: int, cooldown_ms: int) -> set[str]:
+        rows = self.db.execute(
+            "SELECT DISTINCT symbol FROM positions "
+            "WHERE status='CLOSED' AND close_time_ms IS NOT NULL AND close_time_ms > ?",
+            (now_ms - cooldown_ms,),
+        ).fetchall()
         return {r[0] for r in rows}
 
     def signal_used(self, symbol: str, candle_ms: int) -> bool:
@@ -124,22 +286,39 @@ class Journal:
         )
         self.db.commit()
 
-    def insert_open(self, values: dict[str, Any]) -> None:
+    def insert_open(self, values: dict[str, Any], bank_spend: float = 0.0) -> None:
         fields = ",".join(values)
         marks = ",".join("?" for _ in values)
-        self.db.execute(f"INSERT INTO positions ({fields}) VALUES ({marks})", tuple(values.values()))
-        self.db.commit()
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            self.db.execute(f"INSERT INTO positions ({fields}) VALUES ({marks})", tuple(values.values()))
+            if bank_spend > 0:
+                self.bank_info(-bank_spend)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
 
     def open_rows(self):
         return self.db.execute("SELECT * FROM positions WHERE status='OPEN' ORDER BY entry_time_ms").fetchall()
 
     def close(self, row_id: int, close_time_ms: int, exit_price: float | None,
-              pnl: float, status: str, payload: dict[str, Any]) -> None:
-        self.db.execute("""
-            UPDATE positions SET status='CLOSED', close_time_ms=?, exit_price=?, pnl_usdt=?,
-            close_status=?, close_pnl_json=? WHERE id=? AND status='OPEN'
-        """, (close_time_ms, exit_price, pnl, status, json.dumps(payload, ensure_ascii=False), row_id))
-        self.db.commit()
+              pnl: float, status: str, payload: dict[str, Any], bank_add: float = 0.0) -> None:
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = self.db.execute("""
+                UPDATE positions SET status='CLOSED', close_time_ms=?, exit_price=?, pnl_usdt=?,
+                close_status=?, close_pnl_json=? WHERE id=? AND status='OPEN'
+            """, (close_time_ms, exit_price, pnl, status,
+                  json.dumps(payload, ensure_ascii=False), row_id))
+            # Bank update and OPEN -> CLOSED transition commit atomically.
+            # A repeated reconciliation cannot add the same SL a second time.
+            if cursor.rowcount and bank_add:
+                self.bank_info(bank_add)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
 
 
 def round_down(value: Decimal, step: Decimal) -> Decimal:
@@ -210,7 +389,9 @@ def reconcile(sess: HTTP, journal: Journal, live: dict[str, dict[int, dict[str, 
         exit_price = float(payload.get("avgExitPrice") or 0) or None
         pnl = float(payload.get("closedPnl") or 0)
         tp = float(row["tp_price"]); sl = float(row["sl_price"])
-        if exit_price is not None:
+        if row["close_status"] == "ROI":
+            status = "ROI"
+        elif exit_price is not None:
             tolerance = max(abs(tp), abs(sl)) * 0.002
             if abs(exit_price - tp) <= tolerance:
                 status = "TP"
@@ -221,23 +402,97 @@ def reconcile(sess: HTTP, journal: Journal, live: dict[str, dict[int, dict[str, 
         else:
             status = "TP" if pnl >= 0 else "SL"
         close_time = int(payload.get("updatedTime") or payload.get("createdTime") or time.time() * 1000)
-        journal.close(row["id"], close_time, exit_price, pnl, status, payload)
+        sl_bank_add = float(row["notional_usdt"]) * 2 if status == "SL" else 0.0
+        journal.close(row["id"], close_time, exit_price, pnl, status, payload,
+                      bank_add=sl_bank_add)
+        if sl_bank_add:
+            log.info("SL bank updated for %s: +%s (2 × notional %s)",
+                     row["symbol"], sl_bank_add, row["notional_usdt"])
+        if abs(pnl) < 1e-12:
+            log.warning("CLOSED %s %s status=%s with zero realized PnL; verify Bybit execution history", row["symbol"], row["side"], status)
         log.info("CLOSED %s %s status=%s pnl=%s", row["symbol"], row["side"], status, pnl)
 
 
+def wallet_equity(sess: HTTP) -> Decimal:
+    response = check(sess.get_wallet_balance(accountType="UNIFIED", coin=SETTLE_COIN), "get_wallet_balance")
+    wallets = response["result"]["list"]
+    if not wallets or wallets[0].get("totalEquity") in (None, ""):
+        raise RuntimeError("Bybit response does not contain unified-account totalEquity")
+    return Decimal(str(wallets[0]["totalEquity"]))
+
+
+def manage_roi_cycle(sess: HTTP, journal: Journal) -> bool:
+    global NOTIONAL_USDT
+    """Close every position at +ROI_TARGET_PCT; persist equity as the next cycle base."""
+    pending = journal.state("roi_close_pending", "0") == "1"
+    start_balance = Decimal(journal.state("cycle_start_balance", str(INITIAL_CYCLE_BALANCE_USDT)))
+
+    if not pending:
+        equity = wallet_equity(sess)
+        threading.Thread(target=plot_wallet_history).start()
+        journal.record_wallet_equity(equity)
+        target_balance = (start_balance * (Decimal("1") + ROI_TARGET_PCT)) + estimate_market_close_fee(sess)
+        if equity < target_balance:
+            print(equity, target_balance)
+            return False
+        log.info(
+            "Cycle ROI target reached: equity=%s start=%s target=%s (+%s%%)",
+            equity, start_balance, target_balance, ROI_TARGET_PCT * 100,
+        )
+        journal.start_roi_close()
+        pending = True
+
+    # Persisted pending state makes partial closes and restarts safe: continue
+    # flattening even if equity falls while the exchange processes close orders.
+    live = positions(sess)
+    for symbol, legs in live.items():
+        for position_idx, position in legs.items():
+            qty = str(position.get("size", "0"))
+            if Decimal(qty) <= 0:
+                continue
+            close_side = "Sell" if position.get("side") == "Buy" else "Buy"
+            check(sess.place_order(
+                category=CATEGORY, symbol=symbol, side=close_side,
+                positionIdx=position_idx, orderType="Market", qty=qty,
+                timeInForce="IOC", reduceOnly=True,
+                orderLinkId=f"roi-{symbol.lower()[:12]}-{int(time.time() * 1000)}-{position_idx}",
+            ), f"close_roi_position({symbol})")
+            log.info("ROI close submitted %s side=%s idx=%s qty=%s", symbol, close_side, position_idx, qty)
+
+    remaining = positions(sess)
+    reconcile(sess, journal, remaining)
+    if remaining or journal.open_rows():
+        log.warning("ROI close is still pending: live_positions=%d journal_open=%d",
+                    sum(len(legs) for legs in remaining.values()), len(journal.open_rows()))
+        return True
+
+    new_start_balance = wallet_equity(sess)
+    NOTIONAL_USDT = Decimal(os.getenv("POSITION_NOTIONAL_USDT", f"{new_start_balance * Decimal("0.05")}"))
+    journal.finish_cycle(new_start_balance)
+    log.info("ROI cycle complete; next cycle start balance saved: %s USDT", new_start_balance)
+    return True
+
+
 def open_position(sess: HTTP, journal: Journal, symbol: str, signal_side: str, candle_ms: int) -> None:
+    global NOTIONAL_USDT
     side = "Buy" if signal_side == "Long" else "Sell"
     position_idx = 1 if side == "Buy" else 2  # hedge-mode: 1 long, 2 short
+    if symbol in journal.cooldown_symbols(int(time.time() * 1000), ENTRY_COOLDOWN_SECONDS * 1000):
+        log.info("SKIP %s: entry cooldown after recent close is active", symbol)
+        return
     live = positions(sess)
     if symbol in live:
         log.info("SKIP %s: a position for this symbol is already open", symbol)
         return
     if journal.signal_used(symbol, candle_ms):
         return
+    bank_balance = Decimal(str(journal.bank_all()))
+    dop_usdt = bank_balance / Decimal("10") if bank_balance > Decimal("10") else Decimal("0")
+    position_notional = NOTIONAL_USDT + dop_usdt
     ticker = check(sess.get_tickers(category=CATEGORY, symbol=symbol), "get_tickers")["result"]["list"][0]
     entry = Decimal(ticker["lastPrice"])
     qty_step, min_qty, tick_size = rules(sess, symbol)
-    qty = round_down(NOTIONAL_USDT / entry, qty_step)
+    qty = round_down(position_notional / entry, qty_step)
     if qty <= 0 or qty < min_qty:
         log.warning("SKIP %s: qty %s < minOrderQty %s", symbol, qty, min_qty)
         return
@@ -261,19 +516,33 @@ def open_position(sess: HTTP, journal: Journal, symbol: str, signal_side: str, c
         "symbol": symbol, "side": signal_side, "position_idx": position_idx, "status": "OPEN",
         "entry_order_id": response["result"]["orderId"], "entry_time_ms": now,
         "entry_price": actual_entry, "tp_price": float(tp), "sl_price": float(sl),
-        "qty": actual_qty, "notional_usdt": float(NOTIONAL_USDT),
-        "margin_usdt": float(NOTIONAL_USDT / Decimal(str(leverage))), "leverage": leverage,
+        "qty": actual_qty, "notional_usdt": float(position_notional),
+        "margin_usdt": float(position_notional / Decimal(str(leverage))), "leverage": leverage,
         "signal_candle_ms": candle_ms,
-    })
-    log.info("OPENED %s %s idx=%s qty=%s TP=%s SL=%s", symbol, signal_side, position_idx, actual_qty, tp, sl)
+    }, bank_spend=float(dop_usdt))
+    log.info("OPENED %s %s idx=%s qty=%s notional=%s (base=%s + bank=%s) TP=%s SL=%s",
+             symbol, signal_side, position_idx, actual_qty, position_notional,
+             NOTIONAL_USDT, dop_usdt, tp, sl)
 
 
 def run_once(sess: HTTP, journal: Journal, symbols: list[str], disabled: set[str]) -> None:
     live = positions(sess)
     reconcile(sess, journal, live)
+    try:
+        if manage_roi_cycle(sess, journal):
+            return
+    except Exception:
+        log.exception("ROI-cycle management failed; new entries paused")
+        return
+    if optimization_active.is_set():
+        log.info("Optimization window active: monitoring positions; new entries paused")
+        return
     occupied = set(live) | journal.open_symbols()
+    cooldown = journal.cooldown_symbols(
+        int(time.time() * 1000), ENTRY_COOLDOWN_SECONDS * 1000
+    )
     for symbol in symbols:
-        if symbol in occupied or symbol in disabled:
+        if symbol in occupied or symbol in disabled or symbol in cooldown:
             continue
         try:
             result = signal(symbol, session=sess)
@@ -283,6 +552,16 @@ def run_once(sess: HTTP, journal: Journal, symbols: list[str], disabled: set[str
         except Exception as exc:
             text = str(exc)
             if (
+                "110007" in text
+                or "ab not enough for new order" in text.lower()
+                or "available balance is insufficient" in text.lower()
+            ):
+                log.warning(
+                    "SKIP %s: insufficient available balance for entry; "
+                    "order was rejected and the bot will continue with the next symbol. Details: %s",
+                    symbol, text[:250],
+                )
+            elif (
                 "110125" in text
                 or "110126" in text
                 or "Crude Oil Trading Terms" in text
@@ -296,34 +575,225 @@ def run_once(sess: HTTP, journal: Journal, symbols: list[str], disabled: set[str
 
 
 def optimizer_worker(symbols: list[str]) -> None:
-    """Refresh the 7-day candle cache and optimize the filter once per UTC day."""
+    """Run the rolling 7-day optimization once per day at 01:00 Moscow time."""
     store = CandleStore(FILTER_OPT_DB)
     active = load_active(store)
     if active:
         apply_params(active)
         log.info("Loaded saved filter parameters: %s", active.as_dict())
     while True:
+        now = datetime.now(MSK)
+        today = now.date()
+        target = datetime(today.year, today.month, today.day, OPTIMIZATION_HOUR_MSK, tzinfo=MSK)
+        if now < target:
+            sleep_seconds = (target - now).total_seconds()
+            time.sleep(max(30.0, sleep_seconds))
+            continue
+        run_day = today.isoformat()
+        if store.meta("last_run_day") == run_day:
+            tomorrow = target + timedelta(days=1)
+            time.sleep(max(30.0, (tomorrow - now).total_seconds()))
+            continue
+        optimization_active.set()
         try:
-            result = daily_reoptimize(create_demo_session(), symbols, store)
+            log.info("Starting daily filter optimization at 01:00 MSK")
+            result = daily_reoptimize(create_demo_session(), symbols, store, run_day=run_day)
             if result:
                 params, stats = result
                 log.info("Daily filter update: params=%s stats=%s", params.as_dict(), stats)
         except Exception:
             log.exception("Daily filter optimization failed; existing parameters remain active")
-        now = time.time()
-        next_utc_day = (int(now) // 86400 + 1) * 86400
-        time.sleep(max(60.0, next_utc_day - now + 5.0))
+            time.sleep(300.0)
+        finally:
+            optimization_active.clear()
+            log.info("Daily filter optimization finished; new entries resumed")
 
+def estimate_market_close_fee(sess: HTTP) -> Decimal:
+    """Estimate taker fees (USDT) to market-close every open linear position.
+
+    Bybit calculates linear-contract trade fees from executed order value and
+    the account's taker rate. Mark price is used as the execution-price
+    estimate; the actual fee can differ with market movement/slippage.
+    """
+    live = positions(sess)
+    total_fee = Decimal("0")
+    use_configured_rate = bool(DEMO_CONFIG.get("demo", False) or DEMO_CONFIG.get("testnet", False))
+    fee_rates: dict[str, Decimal] = {}
+
+    for symbol, legs in live.items():
+        if symbol not in fee_rates:
+            if use_configured_rate:
+                # Get Fee Rate is not listed among supported Demo Trading APIs.
+                fee_rates[symbol] = DEMO_TAKER_FEE_RATE
+            else:
+                fee_response = check(
+                    sess.get_fee_rates(category=CATEGORY, symbol=symbol),
+                    f"get_fee_rates({symbol})",
+                )
+                fee_rows = fee_response.get("result", {}).get("list", [])
+                fee_row = next((row for row in fee_rows if row.get("symbol") == symbol), None)
+                if fee_row is None:
+                    raise RuntimeError(f"Bybit returned no fee rate for {symbol}")
+                fee_rates[symbol] = Decimal(str(fee_row["takerFeeRate"]))
+        taker_rate = fee_rates[symbol]
+
+        for position in legs.values():
+            qty = Decimal(str(position.get("size", "0")))
+            if qty <= 0:
+                continue
+            mark_price = Decimal(str(position.get("markPrice") or "0"))
+            if mark_price <= 0:
+                raise RuntimeError(f"No valid markPrice for open position {symbol}")
+            total_fee += qty * mark_price * taker_rate
+
+    return total_fee
+
+def send_or_update_photo():
+
+    global api_t, chat
+
+    photo_path = 'live_graf.png'
+    storage_file = 'msg_id.txt'
+
+    # Проверяем, существует ли файл с сохранённым ID
+    msg_id = False
+    try:
+        if os.path.exists(storage_file):
+            with open(storage_file, 'r') as f:
+                msg_id = f.read().strip()
+    except:
+        pass
+
+    if msg_id:
+        # Пытаемся обновить существующее сообщение
+        url = f'https://api.telegram.org/bot{api_t}/editMessageMedia'
+        media = {
+            'type': 'photo',
+            'media': 'attach://photo'  # файл будет передан в поле 'photo'
+        }
+        try:
+            with open(photo_path, 'rb') as photo_file:
+                files = {
+                    'photo': (photo_path, photo_file, 'image/png')
+                }
+                data = {
+                    'chat_id': chat,
+                    'message_id': msg_id,
+                    'media': json.dumps(media)
+                }
+                response = requests.post(url, data=data, files=files)
+                response.raise_for_status()
+                #print("Фото успешно обновлено.")
+                return
+        except Exception as e:
+            pass
+            return
+            #print(f"Ошибка при обновлении фото: {e}")
+
+
+    if not msg_id:
+        # Отправка нового фото (если ID нет или обновление провалилось)
+        url = f'https://api.telegram.org/bot{api_t}/sendPhoto'
+        try:
+            with open(photo_path, 'rb') as photo_file:
+                files = {
+                    'photo': (photo_path, photo_file, 'image/png')
+                }
+                data = {
+                    'chat_id': chat
+                }
+                response = requests.post(url, data=data, files=files)
+                response.raise_for_status()
+                result = response.json()
+                if result.get('ok'):
+                    message_id = result['result']['message_id']
+                    with open(storage_file, 'w') as f:
+                        f.write(str(message_id))
+                    #print("Новое фото отправлено, ID сохранён.")
+                else:
+                    pass
+                    #print("Ошибка отправки: ответ Telegram не содержит 'ok'.")
+        except Exception as e:
+            pass
+            #print(f"Ошибка при отправке фото: {e}")
+
+
+def plot_wallet_history(
+    db_path=DB_PATH,
+    output_path="live_graf.png",
+):
+
+    db_path = Path(db_path)
+    output_path = Path(output_path)
+
+    if not db_path.is_file():
+        raise FileNotFoundError(f"Файл базы данных не найден: {db_path}")
+
+    with sqlite3.connect(db_path) as conn:
+        df = pd.read_sql_query(
+            """
+            SELECT value, updated_at
+            FROM wallet
+            WHERE value IS NOT NULL
+            ORDER BY id
+            """,
+            conn,
+        )
+
+    if df.empty:
+        raise ValueError("В таблице wallet пока нет данных для графика")
+
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    df["updated_at"] = pd.to_datetime(df["updated_at"], errors="coerce")
+    df = df.dropna(subset=["value", "updated_at"])
+
+    if df.empty:
+        raise ValueError("В таблице wallet нет корректных значений баланса или времени")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    plt.rcParams["font.family"] = "DejaVu Sans"  # поддерживает кириллицу
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    ax.plot(
+        df["updated_at"],
+        df["value"],
+        color="blue",
+        linewidth=1.5,
+        label="Баланс",
+    )
+
+    ax.set_title("История баланса")
+    ax.set_xlabel("Время")
+    ax.set_ylabel("Баланс, USDT")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d %H:%M"))
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    send_or_update_photo()
+
+    return output_path
 
 def main() -> None:
+    global NOTIONAL_USDT
+
     sess = create_demo_session()
+    equity = wallet_equity(sess)
+    NOTIONAL_USDT = Decimal(os.getenv("POSITION_NOTIONAL_USDT", f"{equity * Decimal("0.05")}"))
+    print(equity, NOTIONAL_USDT)
     journal = Journal(DB_PATH)
     symbols = load_symbols()
     disabled = journal.disabled_symbols()
     if disabled:
         log.warning("Disabled symbols loaded from SQLite: %s", ", ".join(sorted(disabled)))
     threading.Thread(target=optimizer_worker, args=(symbols,), name="daily-filter-optimizer", daemon=True).start()
-    log.info("Started: symbols=%d notional=$%s TP/SL=%s%% poll=%ss", len(symbols), NOTIONAL_USDT, TP_SL_PCT * 100, POLL_SECONDS)
+    log.info("Started: symbols=%d notional=$%s TP/SL=%s%% cycle ROI=+%s%% initial cycle balance=$%s poll=%ss",
+             len(symbols), NOTIONAL_USDT, TP_SL_PCT * 100, ROI_TARGET_PCT * 100,
+             INITIAL_CYCLE_BALANCE_USDT, POLL_SECONDS)
     while True:
         started = time.monotonic()
         run_once(sess, journal, symbols, disabled)
