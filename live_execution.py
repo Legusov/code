@@ -108,8 +108,15 @@ class BybitREST:
         response = self.session.request(method, url, data=body, headers=headers, timeout=LIVE_TIMEOUT)
         response.raise_for_status()
         payload_json = response.json()
-        if payload_json.get("retCode") != 0:
-            raise LiveTradingError(f"Bybit API {path}: {payload_json.get('retCode')} {payload_json.get('retMsg')}")
+        ret_code = payload_json.get("retCode")
+        # Bybit returns 110043 when the requested leverage is already set.
+        # Treat it as success only for this specific configuration endpoint.
+        if (str(ret_code) == "110043" and method == "POST"
+                and path == "/v5/position/set-leverage"):
+            logging.info("Bybit %s: плечо уже установлено (110043); продолжаю", path)
+            return payload_json.get("result", {})
+        if ret_code != 0:
+            raise LiveTradingError(f"Bybit API {path}: {ret_code} {payload_json.get('retMsg')}")
         return payload_json.get("result", {})
 
     def open_positions(self, symbol: str | None = None) -> list[dict[str, Any]]:
