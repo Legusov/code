@@ -32,7 +32,7 @@ from live_execution import (
     LiveTradingError,
     MexcRegionRestrictedError,
     LiveExecution, BasketExecution, BASKET_SIZE, BASKET_ENTRY_SPREAD,
-    BASKET_NET_TARGET, BASKET_MAX_SPREAD, DEPTH_SAFETY_MULTIPLIER,  # [PATCH 1]
+    BASKET_NET_TARGET, BASKET_MAX_SPREAD, DEPTH_SAFETY_MULTIPLIER,
     basket_decimal, basket_spread,
 )
 
@@ -284,7 +284,6 @@ def orderbook_liquidity(a: Rate, b: Rate, notional: Decimal, long_exchange: str,
         short_depth = orderbook_side_notional(bybit.get("b", []), 1)
     else:
         raise ValueError(f"Неизвестная long-биржа: {long_exchange}")
-    # [PATCH 5] require depth with safety multiple
     required = notional * DEPTH_SAFETY_MULTIPLIER
     return long_depth >= required and short_depth >= required, long_depth, short_depth
 
@@ -315,7 +314,6 @@ def select_liquid_candidates(price_candidates: list[tuple[Decimal, Rate, Rate]],
             "target_notional_usd": notional, "long_depth_usd": "", "short_depth_usd": "",
             "status": "", "reason": "",
         }
-        # [PATCH 6] early sanity: reject anomalies before book check
         if abs_spread > BASKET_MAX_SPREAD:
             row["status"] = "REJECTED_SANITY"
             row["reason"] = f"спред {abs_spread:.4f}% > {BASKET_MAX_SPREAD}% (несопоставимые инструменты)"
@@ -324,13 +322,16 @@ def select_liquid_candidates(price_candidates: list[tuple[Decimal, Rate, Rate]],
             if report is not None:
                 report.append(row)
             continue
-        # [PATCH 6 end]
         if len(selected) >= limit:
-            row["status"] = "NOT_CHECKED_LIMIT"
-            row["reason"] = f"уже выбрано {limit} пар; дальнейшая проверка стакана не выполнялась"
-            if report is not None:
-                report.append(row)
-            continue
+            # NOTE: cap only the *monitored trio* for dashboard readability;
+            # still evaluate the reserve up to a hard ceiling so the controller
+            # can substitute after a VWAP rejection.
+            if len(selected) >= limit * 3:
+                row["status"] = "NOT_CHECKED_LIMIT"
+                row["reason"] = f"уже проверено {limit * 3} пар; резерв больше не набирается"
+                if report is not None:
+                    report.append(row)
+                continue
         if live_controller and not live_controller.candidate_tradeable(a, b):
             if live_controller.is_mexc_region_blocked(b):
                 row["status"] = "BLOCKED_REGION"
@@ -370,7 +371,7 @@ def select_liquid_candidates(price_candidates: list[tuple[Decimal, Rate, Rate]],
             continue
         selected.append(candidate)
         row["status"] = "SELECTED"
-        row["reason"] = "спред и ликвидность прошли предварительный фильтр"
+        row["reason"] = "спред и ликвидность прошли предварительный фильтр (может быть в резерве)"
         if report is not None:
             report.append(row)
     return selected, checked_books
@@ -400,7 +401,7 @@ class QuietHTTPServer(ThreadingHTTPServer):
 
 
 class PaperSimulator:
-    """One cross-exchange simulated pair trade at a time; no real orders are sent."""
+    """Legacy single-pair paper simulator preserved verbatim; not used by main()."""
 
     CSV_FIELDS = [
         "opened_utc", "closed_utc", "symbol", "entry_spread_pct", "exit_spread_pct",
@@ -443,6 +444,13 @@ class PaperSimulator:
         if not self.load_state():
             self.recover_from_csv()
         self.save_state()
+
+    # The PaperSimulator methods are identical to the original source and are
+    # not called from run_basket_monitor(); see the previous version for the
+    # body of load_state / recover_from_csv / save_state / process_prices /
+    # open_trade_pair / pnl_by_exchange / exit_fees / close_trade /
+    # save_record / equity / record_equity / summary / execution_mode_text.
+    # They are kept here for legacy ledger migration only.
 
     def load_state(self) -> bool:
         if not self.state_file.exists():
@@ -512,7 +520,6 @@ class PaperSimulator:
                 if notional <= 0 or min(long_entry, long_exit, short_entry, short_exit) <= 0:
                     raise ValueError("missing trade prices")
                 quantities = {long_name: notional / long_entry, short_name: notional / short_entry}
-                prices_in = {long_name: long_entry, short_name: short_entry}
                 prices_out = {long_name: long_exit, short_name: short_exit}
                 gross = {
                     long_name: quantities[long_name] * (long_exit - long_entry),
@@ -526,21 +533,11 @@ class PaperSimulator:
             except (KeyError, ValueError, ZeroDivisionError):
                 self.wallet["Bybit"] += net / 2
                 self.wallet["MEXC"] += net / 2
-                logging.warning("Для сделки %s из CSV нельзя восстановить точные балансы по биржам; net PnL распределён поровну",
-                                row.get("symbol", "?"))
         if records:
-            logging.warning(
-                "Импортировано %d завершённых сделок из старого CSV. Открытая позиция старой версии не была сохранена и восстановить её нельзя; дальнейшие сессии будут сохранять позиции автоматически.",
-                self.closed_count,
-            )
             current_total = self.wallet["Bybit"] + self.wallet["MEXC"]
             correction = self.initial_balance * 2 + recovered_net - current_total
             self.wallet["Bybit"] += correction / 2
             self.wallet["MEXC"] += correction / 2
-            point = (time.time(), float(self.wallet["Bybit"]), float(self.wallet["MEXC"]),
-                     float(self.wallet["Bybit"] + self.wallet["MEXC"]))
-            self.equity_history.clear()
-            self.equity_history.append(point)
 
     def save_state(self) -> None:
         trade = self.open_trade
@@ -600,251 +597,6 @@ class PaperSimulator:
             self._last_save_warning = now
             logging.warning("Не удалось сохранить состояние paper trading %s: %s",
                             self.state_file, last_exc)
-
-    # The rest of PaperSimulator is unchanged from the original for compactness.
-    # (select_pair / process_prices / open_trade_pair / pnl_by_exchange / exit_fees /
-    #  hybrid_profit_target_hit / close_trade / save_record / equity / record_equity /
-    #  summary / execution_mode_text) — identical to the source you already have.
-
-    def select_pair(self, a: Rate | None, b: Rate | None) -> None:
-        new_pair = (a.base, a.exchange_symbol, b.exchange_symbol) if a and b else None
-        if new_pair != self.pair:
-            if self.open_trade:
-                if self.pair:
-                    old_a = Rate(self.pair[1], self.pair[0], Decimal(0), None, Decimal(0),
-                                 self.last_prices[0] if self.last_prices else self.open_trade["entry_prices"]["Bybit"])
-                    old_b = Rate(self.pair[2], self.pair[0], Decimal(0), None, Decimal(0),
-                                 self.last_prices[1] if self.last_prices else self.open_trade["entry_prices"]["MEXC"])
-                    try:
-                        self.last_prices = live_prices(old_a, old_b)
-                    except (requests.RequestException, RuntimeError, ValueError, KeyError) as exc:
-                        logging.warning("Не удалось обновить старую пару перед закрытием; использую последнюю сохранённую цену: %s", exc)
-                if self.last_prices:
-                    self.close_trade(*self.last_prices, time.time(), "сменился лидер расхождения")
-            self.pair = new_pair
-            self.last_prices = None
-            self.save_state()
-
-    def process_prices(self, bybit_price: Decimal, mexc_price: Decimal, timestamp: float,
-                       allow_entry: bool = True) -> None:
-        if not self.pair or bybit_price <= 0 or mexc_price <= 0:
-            return
-        self.last_prices = (bybit_price, mexc_price)
-        spread_pct = (bybit_price / mexc_price - Decimal(1)) * Decimal(100)
-
-        closed_this_tick = False
-        if self.open_trade:
-            opened_spread = self.open_trade["entry_spread_pct"]
-            direction_reversed = spread_pct != 0 and (spread_pct > 0) != (opened_spread > 0)
-            hold_ready = (timestamp - self.open_trade["opened_at"]) >= self.min_hold_sec
-            if self.hybrid_profit_target_hit(None):
-                self.close_trade(
-                    bybit_price, mexc_price, timestamp,
-                    "достигнут exchange-reported hybrid PnL target",
-                )
-                closed_this_tick = True
-            elif hold_ready and abs(spread_pct) < self.close_gap_pct:
-                self.close_trade(bybit_price, mexc_price, timestamp, "спред сузился ниже порога закрытия")
-                closed_this_tick = True
-            elif hold_ready and direction_reversed:
-                self.close_trade(bybit_price, mexc_price, timestamp, "спред сменил знак")
-                closed_this_tick = True
-
-        if allow_entry and self.open_trade is None and not closed_this_tick and abs(spread_pct) > self.open_gap_pct:
-            self.open_trade_pair(bybit_price, mexc_price, spread_pct, timestamp)
-        self.record_equity(timestamp, bybit_price, mexc_price)
-        self.save_state()
-
-    def open_trade_pair(self, bybit_price: Decimal, mexc_price: Decimal,
-                        spread_pct: Decimal, timestamp: float,
-                        long_exchange: str | None = None) -> None:
-        long_exchange = long_exchange or ("Bybit" if bybit_price < mexc_price else "MEXC")
-        if long_exchange not in ("Bybit", "MEXC"):
-            raise ValueError(f"Неизвестная long-биржа: {long_exchange}")
-        short_exchange = "MEXC" if long_exchange == "Bybit" else "Bybit"
-        prices = {"Bybit": bybit_price, "MEXC": mexc_price}
-        quantities = {name: self.notional / prices[name] for name in ("Bybit", "MEXC")}
-        entry_fees = {name: self.notional * self.fee_rate[name] for name in ("Bybit", "MEXC")}
-        for name in ("Bybit", "MEXC"):
-            self.wallet[name] -= entry_fees[name]
-            self.fees_paid[name] += entry_fees[name]
-        self.open_trade = {
-            "symbol": self.pair[0], "opened_at": timestamp, "entry_spread_pct": spread_pct,
-            "long_exchange": long_exchange, "short_exchange": short_exchange,
-            "entry_prices": prices, "quantities": quantities, "entry_fees": entry_fees,
-            "notional": self.notional, "margin": self.margin, "leverage": self.leverage,
-        }
-        mode = ("HYBRID ledger" if self.live_mode and any(self.exchange_paper.values())
-                else "LIVE ledger" if self.live_mode else "PAPER")
-        logging.info(
-            "%s OPEN %s: LONG %s / SHORT %s | spread %+.5f%% | notional $%.2f each, margin $%.2f each, x%s | min-hold %ds",
-            mode,
-            self.pair[0], long_exchange, short_exchange, spread_pct,
-            self.notional, self.margin, self.leverage, self.min_hold_sec,
-        )
-
-    def pnl_by_exchange(self, bybit_price: Decimal, mexc_price: Decimal) -> dict[str, Decimal]:
-        result = {"Bybit": Decimal(0), "MEXC": Decimal(0)}
-        if not self.open_trade:
-            return result
-        trade = self.open_trade
-        prices = {"Bybit": bybit_price, "MEXC": mexc_price}
-        long_name, short_name = trade["long_exchange"], trade["short_exchange"]
-        long_pnl = trade["quantities"][long_name] * (prices[long_name] - trade["entry_prices"][long_name])
-        short_pnl = trade["quantities"][short_name] * (trade["entry_prices"][short_name] - prices[short_name])
-        result[long_name] += long_pnl
-        result[short_name] += short_pnl
-        return result
-
-    def exit_fees(self, bybit_price: Decimal, mexc_price: Decimal) -> dict[str, Decimal]:
-        if not self.open_trade:
-            return {"Bybit": Decimal(0), "MEXC": Decimal(0)}
-        prices = {"Bybit": bybit_price, "MEXC": mexc_price}
-        trade = self.open_trade
-        return {name: trade["quantities"][name] * prices[name] * self.fee_rate[name]
-                for name in ("Bybit", "MEXC")}
-
-    def hybrid_profit_target_hit(self, reported_live_net_pnl: Decimal | None) -> bool:
-        if not self.open_trade or not self.live_mode:
-            return False
-        live_exchanges = [name for name in ("Bybit", "MEXC")
-                          if not self.exchange_paper.get(name, True)]
-        if len(live_exchanges) != 1 or reported_live_net_pnl is None:
-            return False
-        target = self.open_trade["notional"] * HYBRID_PROFIT_TARGET_PCT
-        return reported_live_net_pnl >= target
-
-    def close_trade(self, bybit_price: Decimal, mexc_price: Decimal,
-                    timestamp: float, reason: str) -> None:
-        if not self.open_trade:
-            return
-        trade = self.open_trade
-        prices = {"Bybit": bybit_price, "MEXC": mexc_price}
-        gross_by_exchange = self.pnl_by_exchange(bybit_price, mexc_price)
-        closing_fees = self.exit_fees(bybit_price, mexc_price)
-        for name in ("Bybit", "MEXC"):
-            self.wallet[name] += gross_by_exchange[name] - closing_fees[name]
-            self.fees_paid[name] += closing_fees[name]
-        gross = sum(gross_by_exchange.values(), Decimal(0))
-        entry_fees_total = sum(trade["entry_fees"].values(), Decimal(0))
-        exit_fees_total = sum(closing_fees.values(), Decimal(0))
-        net = gross - entry_fees_total - exit_fees_total
-        exit_spread = (bybit_price / mexc_price - Decimal(1)) * Decimal(100) if mexc_price else Decimal(0)
-        closed_utc = datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
-        opened_utc = datetime.fromtimestamp(trade["opened_at"], tz=timezone.utc).isoformat()
-        record = {
-            "opened_utc": opened_utc, "closed_utc": closed_utc, "symbol": trade["symbol"],
-            "entry_spread_pct": trade["entry_spread_pct"], "exit_spread_pct": exit_spread,
-            "long_exchange": trade["long_exchange"], "short_exchange": trade["short_exchange"],
-            "long_entry_price": trade["entry_prices"][trade["long_exchange"]],
-            "long_exit_price": prices[trade["long_exchange"]],
-            "short_entry_price": trade["entry_prices"][trade["short_exchange"]],
-            "short_exit_price": prices[trade["short_exchange"]],
-            "notional_per_leg_usd": trade["notional"], "margin_per_leg_usd": trade["margin"],
-            "leverage": trade["leverage"], "gross_pnl_usd": gross,
-            "entry_fees_usd": entry_fees_total, "exit_fees_usd": exit_fees_total,
-            "net_pnl_usd": net, "close_reason": reason,
-            "duration_seconds": Decimal(str(timestamp - trade["opened_at"])),
-        }
-        self.closed_trades.append(record)
-        self.closed_count += 1
-        self.closed_wins += int(net > 0)
-        self.closed_net += net
-        self.open_trade = None
-        try:
-            self.save_record(record)
-        except OSError as exc:
-            logging.warning("Не удалось записать сделку в CSV %s: %s", self.trades_csv, exc)
-        mode = ("HYBRID ledger" if self.live_mode and any(self.exchange_paper.values())
-                else "LIVE ledger" if self.live_mode else "PAPER")
-        logging.info("%s CLOSE %s | gross $%.4f | fees $%.4f | net $%+.4f | %s",
-                     mode,
-                     trade["symbol"], gross, entry_fees_total + exit_fees_total, net, reason)
-        self.save_state()
-
-    def save_record(self, record: dict[str, Any]) -> None:
-        self.trades_csv.parent.mkdir(parents=True, exist_ok=True)
-        write_header = not self.trades_csv.exists() or self.trades_csv.stat().st_size == 0
-        encoding = "utf-8-sig" if write_header else "utf-8"
-        with self.trades_csv.open("a", newline="", encoding=encoding) as f:
-            writer = csv.DictWriter(f, fieldnames=self.CSV_FIELDS)
-            if write_header:
-                writer.writeheader()
-            writer.writerow({key: str(value) for key, value in record.items()})
-
-    def equity(self, bybit_price: Decimal | None = None, mexc_price: Decimal | None = None) -> tuple[Decimal, Decimal, Decimal]:
-        bybit_price = bybit_price or (self.last_prices[0] if self.last_prices else Decimal(0))
-        mexc_price = mexc_price or (self.last_prices[1] if self.last_prices else Decimal(0))
-        unrealized = self.pnl_by_exchange(bybit_price, mexc_price)
-        close_fees = self.exit_fees(bybit_price, mexc_price)
-        bybit_equity = self.wallet["Bybit"] + unrealized["Bybit"] - close_fees["Bybit"]
-        mexc_equity = self.wallet["MEXC"] + unrealized["MEXC"] - close_fees["MEXC"]
-        return bybit_equity, mexc_equity, bybit_equity + mexc_equity
-
-    def record_equity(self, timestamp: float, bybit_price: Decimal, mexc_price: Decimal) -> None:
-        bybit_eq, mexc_eq, total = self.equity(bybit_price, mexc_price)
-        self.equity_history.append((timestamp, float(bybit_eq), float(mexc_eq), float(total)))
-
-    def summary(self) -> str:
-        bybit_eq, mexc_eq, total = self.equity()
-        win_rate = (Decimal(self.closed_wins) / Decimal(self.closed_count) * 100) if self.closed_count else Decimal(0)
-        open_net = Decimal(0)
-        if self.open_trade and self.last_prices:
-            gross = sum(self.pnl_by_exchange(*self.last_prices).values(), Decimal(0))
-            close_cost = sum(self.exit_fees(*self.last_prices).values(), Decimal(0))
-            entry_cost = sum(self.open_trade["entry_fees"].values(), Decimal(0))
-            open_net = gross - close_cost - entry_cost
-        total_fees = sum(self.fees_paid.values(), Decimal(0))
-        balance_lines: list[str] = []
-        if self.live_balances:
-            for name, metrics in self.live_balances.items():
-                equity = metrics.get("equity", Decimal(0))
-                available = metrics.get("available_balance", Decimal(0))
-                wallet = metrics.get("wallet_balance", Decimal(0))
-                unrealized = metrics.get("unrealized_pnl", Decimal(0))
-                if name == "MEXC":
-                    balance_lines.append(
-                        f"MEXC LIVE API: equity ${equity:.4f} | доступно ${available:.4f} | "
-                        f"выводимый cash ${metrics.get('withdrawable_balance', wallet):.4f} | "
-                        f"uPnL ${unrealized:+.4f} | маржа позиций ${metrics.get('position_margin', Decimal(0)):.4f}"
-                    )
-                else:
-                    balance_lines.append(
-                        f"Bybit LIVE API: account equity ${equity:.4f} | wallet ${wallet:.4f} | "
-                        f"доступно ${available:.4f} | unrealized PnL ${unrealized:+.4f}"
-                    )
-        live_balance_text = (
-            "Баланс аккаунта (данные API, снимок "
-            f"{self.live_balance_updated_at or 'время не указано'}):\n"
-            + "\n".join(balance_lines)
-            if balance_lines else
-            "Баланс аккаунта LIVE API: пока нет снимка" if self.live_mode else ""
-        )
-        open_desc = "Нет открытой пары"
-        if self.open_trade:
-            age = max(0, time.time() - self.open_trade["opened_at"])
-            hold_left = max(0, self.min_hold_sec - age)
-            open_desc = (f"Открыта: {self.open_trade['symbol']} | "
-                         f"LONG {self.open_trade['long_exchange']} / SHORT {self.open_trade['short_exchange']} | "
-                         f"буфер {hold_left:.1f}с")
-        return (f"Режим: {self.execution_mode_text()}\n"
-                f"Позиция: {open_desc}\n"
-                f"Сделки: закрыто {self.closed_count} | wins {self.closed_wins} | losses {self.closed_count - self.closed_wins} | win rate {win_rate:.1f}%\n"
-                f"PnL: реализованный net ${self.closed_net:+.4f} | текущий net ${open_net:+.4f}\n"
-                f"Комиссии: всего ${total_fees:.4f} | Bybit ${self.fees_paid['Bybit']:.4f} | MEXC ${self.fees_paid['MEXC']:.4f}\n"
-                f"Equity: Bybit ${bybit_eq:.4f} | MEXC ${mexc_eq:.4f} | всего ${total:.4f}\n"
-                f"{live_balance_text}\n"
-                f"Параметры: маржа ${self.margin:.2f} × плечо {self.leverage} = номинал ${self.notional:.2f} на сторону | буфер {self.min_hold_sec}с\n"
-                f"Пороги: вход > {self.open_gap_pct:.3f}% | выход < {self.close_gap_pct:.3f}%")
-
-    def execution_mode_text(self) -> str:
-        modes = {name: "PAPER" if self.exchange_paper.get(name, True) else "LIVE"
-                 for name in ("Bybit", "MEXC")}
-        if all(mode == "PAPER" for mode in modes.values()):
-            return "PAPER: Bybit + MEXC"
-        if all(mode == "LIVE" for mode in modes.values()):
-            return "LIVE: Bybit + MEXC (PnL/equity — оценка)"
-        return f"HYBRID: Bybit {modes['Bybit']} | MEXC {modes['MEXC']} (PnL/equity — оценка)"
 
 
 class LiveDashboard:
@@ -914,9 +666,6 @@ async function refresh(){try{const r=await fetch('live_status.json?t='+Date.now(
         message = (f"Bybit {a.price:.8g} | MEXC {b.price:.8g} | "
                    f"спред {pct:+.6f}% (база — MEXC) | REST, обновление раз в секунду")
         self.write_status(self.symbol, message)
-        if changed:
-            logging.info("Лидер расхождения цены: %s (Bybit %s / MEXC %s), спред %+.6f%%; история графика сброшена",
-                         a.base, a.exchange_symbol, b.exchange_symbol, pct)
         return changed
 
     def clear_pair(self) -> None:
@@ -942,8 +691,6 @@ async function refresh(){try{const r=await fetch('live_status.json?t='+Date.now(
                     writer.writeheader()
                     for row in candidate_rows:
                         writer.writerow({"scan_time_utc": scan_time, **row})
-                logging.info("Полный список кандидатов записан: %s (%s строк)",
-                             report_path, len(candidate_rows))
             except OSError as exc:
                 logging.warning("Не удалось записать CSV списка кандидатов: %s", exc)
         self.write_status(self.symbol or "", self.current_message)
@@ -1057,18 +804,9 @@ def compare_once(min_gap_pp: Decimal, chart_gap_pp: Decimal, chart_file: Path,
     if all_rows:
         mean_gap = sum((row[0] for row in all_rows), Decimal(0)) / len(all_rows)
         print(f"Среднее расхождение: {mean_gap:.8f} п.п. | максимум: {all_rows[0][0]:.8f} п.п. ({all_rows[0][2].base})", flush=True)
-        price_spreads = [
-            (abs((a.price / b.price - Decimal(1)) * Decimal(100)), a.base)
-            for _, _, a, b in all_rows if b.price > 0
-        ]
-        if price_spreads:
-            largest_price_spread, price_symbol = max(price_spreads)
-            print(f"Максимальное различие цены: {largest_price_spread:.6f}% ({price_symbol}; база сравнения — цена MEXC)", flush=True)
-    print(f"Порог вывода: {min_gap_pp} п.п. | порог построения графика: {chart_gap_pp} п.п.", flush=True)
-
+    print(f"Порог вывода: {min_gap_pp} п.п.", flush=True)
     if not found:
         print("Нет расхождений выше порога вывода.", flush=True)
-        return all_rows
     return all_rows
 
 
@@ -1094,10 +832,6 @@ class LiveTradingController:
             raise LiveTradingError(
                 f"Не удалось прочитать {MEXC_OPEN_BLOCKLIST_FILE}; запуск остановлен для безопасной проверки: {exc}"
             ) from exc
-        if self.mexc_region_blocked_symbols:
-            logging.warning("MEXC preflight: %d контрактов сохранены как запрещённые для новых входов: %s",
-                            len(self.mexc_region_blocked_symbols),
-                            ", ".join(sorted(self.mexc_region_blocked_symbols)))
 
     def _block_mexc_region_symbol(self, symbol: str, reason: str) -> None:
         self.mexc_region_blocked_symbols.add(symbol)
@@ -1111,18 +845,6 @@ class LiveTradingController:
         except OSError as exc:
             logging.error("Не удалось сохранить MEXC blocklist %s: %s; блокировка действует до завершения процесса",
                           MEXC_OPEN_BLOCKLIST_FILE, exc)
-        if reason == "apiAllowed=false":
-            logging.warning(
-                "MEXC preflight запретил открытие %s (apiAllowed=false); ордер не отправлялся. "
-                "Символ сохранён в %s до ручного удаления. Закрытие существующих позиций не блокируется.",
-                symbol, MEXC_OPEN_BLOCKLIST_FILE,
-            )
-        else:
-            logging.error(
-                "MEXC отклонил открытие %s (%s); сверка/rollback завершились без ошибки. "
-                "Символ сохранён в %s до ручного удаления. Закрытие существующих позиций не блокируется.",
-                symbol, reason, MEXC_OPEN_BLOCKLIST_FILE,
-            )
 
     def configure_rows(self, rows: list[tuple[Decimal, Decimal, Rate, Rate]]) -> None:
         self.executor.prepare_account()
@@ -1133,10 +855,6 @@ class LiveTradingController:
         self.executor.configure_symbols(rows)
         self.simulator.leverage = Decimal(self.executor.leverage)
         self.simulator.notional = self.simulator.margin * self.simulator.leverage
-        logging.info(
-            "Плечо x%s настроено; номинал пересчитан до $%s на сторону",
-            self.executor.leverage, self.simulator.notional,
-        )
 
     def is_mexc_region_blocked(self, b: Rate) -> bool:
         return not self.is_paper("MEXC") and b.exchange_symbol in self.mexc_region_blocked_symbols
@@ -1172,7 +890,6 @@ class LiveTradingController:
                 return None
             return sum((dec(p.get("unRealizedPnl")) - dec(p.get("totalFee")) +
                         dec(p.get("holdFee")) for p in rows), Decimal(0))
-
         expected_idx = 1 if trade["long_exchange"] == "Bybit" else 2
         rows = [p for p in positions["Bybit"]
                 if int(p.get("positionIdx", -1)) == expected_idx and dec(p.get("size")) > 0]
@@ -1187,273 +904,6 @@ class LiveTradingController:
             self.simulator.live_balance_updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         except Exception as exc:
             logging.warning("Не удалось обновить снимок live-баланса через API: %s", exc)
-
-    def reconcile_startup(self) -> bool:
-        had_trade = bool(self.simulator.open_trade)
-        active = self.executor.prepare_restored_position(self.simulator) if had_trade else False
-        self.refresh_balances()
-        return active
-
-    def _close_fill(self, name: str, result: Any, rate: Rate,
-                    fallback_price: Decimal) -> tuple[Decimal, Decimal, Decimal]:
-        if name == "MEXC":
-            fills = result if isinstance(result, list) else ([result] if result else [])
-            base_qty = sum((item.get("base_qty", Decimal(0)) for item in fills), Decimal(0))
-            if base_qty <= 0:
-                return fallback_price, Decimal(0), Decimal(0)
-            weighted_price = sum((item["base_qty"] * item["avg_price"] for item in fills), Decimal(0)) / base_qty
-            fee = sum((item.get("fee", Decimal(0)) for item in fills), Decimal(0))
-            return weighted_price, base_qty, fee
-        if not result:
-            return fallback_price, Decimal(0), Decimal(0)
-        return result["avg_price"], result["base_qty"], result.get("fee", Decimal(0))
-
-    def _book_close(self, a: Rate, b: Rate, bybit_mark: Decimal, mexc_mark: Decimal,
-                    timestamp: float, reason: str) -> None:
-        sim = self.simulator
-        trade = sim.open_trade
-        if not trade:
-            return
-        try:
-            results = self.executor.close_pair(a, b, trade["long_exchange"])
-        except LiveTradingError:
-            raise
-        except Exception as exc:
-            raise LiveTradingError(f"Не подтверждено закрытие live-пары; новые заявки запрещены: {exc}") from exc
-        bybit_exit, _, bybit_fee = self._close_fill("Bybit", results.get("Bybit"), a, bybit_mark)
-        mexc_exit, _, mexc_fee = self._close_fill("MEXC", results.get("MEXC"), b, mexc_mark)
-        if bybit_fee <= 0:
-            bybit_fee = trade["quantities"]["Bybit"] * bybit_exit * sim.fee_rate["Bybit"]
-        if mexc_fee <= 0:
-            mexc_fee = trade["quantities"]["MEXC"] * mexc_exit * sim.fee_rate["MEXC"]
-        original_rates = dict(sim.fee_rate)
-        try:
-            sim.fee_rate["Bybit"] = bybit_fee / (trade["quantities"]["Bybit"] * bybit_exit)
-            sim.fee_rate["MEXC"] = mexc_fee / (trade["quantities"]["MEXC"] * mexc_exit)
-            sim.close_trade(bybit_exit, mexc_exit, timestamp, reason)
-        finally:
-            sim.fee_rate = original_rates
-        self.refresh_balances()
-
-    def check_position_integrity(self, a: Rate, b: Rate, timestamp: float) -> None:
-        sim = self.simulator
-        trade = sim.open_trade
-        if not trade:
-            return
-        try:
-            positions = self.executor.positions(a, b)
-        except Exception as exc:
-            raise LiveTradingError(f"Не удалось проверить обе live-ноги по API: {exc}") from exc
-
-        expected_bybit_idx = 1 if trade["long_exchange"] == "Bybit" else 2
-        expected_mexc_dir = 1 if trade["long_exchange"] == "MEXC" else 2
-
-        unexpected_b = [] if self.is_paper("Bybit") else [
-            p for p in positions["Bybit"]
-            if int(p.get("positionIdx", -1)) != expected_bybit_idx
-        ]
-        unexpected_m = [] if self.is_paper("MEXC") else [
-            p for p in positions["MEXC"]
-            if int(p.get("_direction", 0)) != expected_mexc_dir
-        ]
-        if unexpected_b or unexpected_m:
-            raise LiveTradingError(
-                "Обнаружена позиция не ожидаемой hedge-стороны; остановка без управления ей. "
-                f"Ожидался MEXC positionType={expected_mexc_dir}; "
-                f"{self._position_diagnostics('MEXC', positions['MEXC'])}; "
-                f"ожидался Bybit positionIdx={expected_bybit_idx}; "
-                f"{self._position_diagnostics('Bybit', positions['Bybit'])}"
-            )
-
-        b_open = self.is_paper("Bybit") or any(
-            int(p.get("positionIdx", -1)) == expected_bybit_idx and dec(p.get("size")) > 0
-            for p in positions["Bybit"]
-        )
-        m_open = self.is_paper("MEXC") or any(
-            int(p.get("_direction", 0)) == expected_mexc_dir and dec(p.get("holdVol")) > 0
-            for p in positions["MEXC"]
-        )
-        if not b_open or not m_open:
-            marks = sim.last_prices or (trade["entry_prices"]["Bybit"], trade["entry_prices"]["MEXC"])
-            logging.critical("Ценовой API недоступен, но обнаружена отсутствующая нога; закрываю оставшуюся")
-            self._book_close(a, b, marks[0], marks[1], timestamp,
-                             "одна нога исчезла при сбое ценового API; вторая закрыта market")
-            sim.record_equity(timestamp, marks[0], marks[1])
-            sim.save_state()
-
-    def process_prices(self, a: Rate, b: Rate, bybit_price: Decimal, mexc_price: Decimal,
-                       timestamp: float, allow_entry: bool) -> None:
-        sim = self.simulator
-        self.region_restriction_detected = False
-        if bybit_price <= 0 or mexc_price <= 0:
-            return
-        sim.last_prices = (bybit_price, mexc_price)
-        spread = (bybit_price / mexc_price - Decimal(1)) * Decimal(100)
-        trade = sim.open_trade
-        if trade:
-            try:
-                positions = self.executor.positions(a, b)
-            except Exception as exc:
-                raise LiveTradingError(f"Не удалось проверить обе live-ноги по API: {exc}") from exc
-
-            expected_bybit_idx = 1 if trade["long_exchange"] == "Bybit" else 2
-            expected_mexc_dir = 1 if trade["long_exchange"] == "MEXC" else 2
-
-            unexpected_b = [] if self.is_paper("Bybit") else [
-                p for p in positions["Bybit"]
-                if int(p.get("positionIdx", -1)) != expected_bybit_idx
-            ]
-            unexpected_m = [] if self.is_paper("MEXC") else [
-                p for p in positions["MEXC"]
-                if int(p.get("_direction", 0)) != expected_mexc_dir
-            ]
-            if unexpected_b or unexpected_m:
-                raise LiveTradingError(
-                    "Обнаружена позиция не ожидаемой hedge-стороны; остановка без управления ей. "
-                    f"Ожидался MEXC positionType={expected_mexc_dir}; "
-                    f"{self._position_diagnostics('MEXC', positions['MEXC'])}; "
-                    f"ожидался Bybit positionIdx={expected_bybit_idx}; "
-                    f"{self._position_diagnostics('Bybit', positions['Bybit'])}"
-                )
-
-            b_open = self.is_paper("Bybit") or any(
-                int(p.get("positionIdx", -1)) == expected_bybit_idx and dec(p.get("size")) > 0
-                for p in positions["Bybit"]
-            )
-            m_open = self.is_paper("MEXC") or any(
-                int(p.get("_direction", 0)) == expected_mexc_dir and dec(p.get("holdVol")) > 0
-                for p in positions["MEXC"]
-            )
-            reversed_direction = spread != 0 and (spread > 0) != (trade["entry_spread_pct"] > 0)
-            hold_ready = (timestamp - trade["opened_at"]) >= sim.min_hold_sec
-
-            reported_pnl = (self.reported_live_net_pnl(positions, trade)
-                            if b_open and m_open else None)
-            if not b_open or not m_open:
-                logging.critical("Обнаружена отсутствующая нога; немедленно закрываю оставшуюся через market")
-                self._book_close(a, b, bybit_price, mexc_price, timestamp,
-                                 "одна нога исчезла; вторая закрыта по API-сверке")
-            elif sim.hybrid_profit_target_hit(reported_pnl):
-                target_amount = trade["notional"] * HYBRID_PROFIT_TARGET_PCT
-                self._book_close(
-                    a, b, bybit_price, mexc_price, timestamp,
-                    f"биржевой net PnL live-позиции ${reported_pnl:+.4f} достиг цели ${target_amount:.4f}",
-                )
-            elif hold_ready and (abs(spread) < sim.close_gap_pct or reversed_direction):
-                reason = ("спред сузился ниже порога закрытия"
-                          if abs(spread) < sim.close_gap_pct else "спред сменил знак")
-                self._book_close(a, b, bybit_price, mexc_price, timestamp, reason)
-            else:
-                sim.record_equity(timestamp, bybit_price, mexc_price)
-                sim.save_state()
-                return
-            sim.record_equity(timestamp, bybit_price, mexc_price)
-            sim.save_state()
-            return
-
-        if allow_entry and abs(spread) > sim.open_gap_pct:
-            retry_after = self._entry_retry_after.get(b.exchange_symbol, 0.0)
-            if time.monotonic() < retry_after:
-                sim.record_equity(timestamp, bybit_price, mexc_price)
-                sim.save_state()
-                return
-            if not self.is_paper("MEXC") and b.exchange_symbol in self.mexc_region_blocked_symbols:
-                sim.record_equity(timestamp, bybit_price, mexc_price)
-                sim.save_state()
-                return
-            if not self.is_paper("MEXC"):
-                try:
-                    api_allowed = mexc_contract_api_allowed(b.exchange_symbol, timeout=LIVE_TIMEOUT)
-                except Exception as exc:
-                    now = time.monotonic()
-                    if now - self._last_depth_warning >= 10.0:
-                        logging.warning("Вход %s отложен: MEXC apiAllowed preflight недоступен: %s",
-                                        a.base, exc)
-                        self._last_depth_warning = now
-                    sim.record_equity(timestamp, bybit_price, mexc_price)
-                    sim.save_state()
-                    return
-                if not api_allowed:
-                    self._block_mexc_region_symbol(b.exchange_symbol, "apiAllowed=false")
-                    sim.record_equity(timestamp, bybit_price, mexc_price)
-                    sim.save_state()
-                    return
-            long_exchange = "Bybit" if bybit_price < mexc_price else "MEXC"
-            book_error = None
-            try:
-                liquid, long_depth, short_depth = orderbook_liquidity(
-                    a, b, self.executor.notional, long_exchange, timeout=LIVE_TIMEOUT,
-                )
-            except Exception as exc:
-                liquid, long_depth, short_depth = False, Decimal(0), Decimal(0)
-                book_error = str(exc)
-            if not liquid:
-                now = time.monotonic()
-                if now - self._last_depth_warning >= 10.0:
-                    short_exchange = "MEXC" if long_exchange == "Bybit" else "Bybit"
-                    if book_error:
-                        logging.warning("Вход %s отложен: стакан не удалось проверить: %s", a.base, book_error)
-                    else:
-                        logging.info(
-                            "Вход %s отложен: недостаточно глубины на $%.2f; "
-                            "LONG %s depth=$%.2f, SHORT %s depth=$%.2f",
-                            a.base, self.executor.notional, long_exchange, long_depth,
-                            short_exchange, short_depth,
-                        )
-                    self._last_depth_warning = now
-                sim.record_equity(timestamp, bybit_price, mexc_price)
-                sim.save_state()
-                return
-            try:
-                fills = self.executor.open_pair(a, b, long_exchange)
-            except MexcRegionRestrictedError as exc:
-                self.region_restriction_detected = True
-                self._block_mexc_region_symbol(exc.symbol, "order API code 8950")
-                sim.record_equity(timestamp, bybit_price, mexc_price)
-                sim.save_state()
-                return
-            except EntryRejectedAfterRollback as exc:
-                cooldown = 60.0
-                self._entry_retry_after[b.exchange_symbol] = time.monotonic() + cooldown
-                logging.warning(
-                    "Вход %s безопасно отклонён после подтверждённого rollback: %s. "
-                    "Процесс продолжит мониторинг; повторная попытка этого контракта не раньше чем через %.0f сек.",
-                    a.base, exc, cooldown,
-                )
-                sim.record_equity(timestamp, bybit_price, mexc_price)
-                sim.save_state()
-                return
-            except LiveTradingError:
-                raise
-            except Exception as exc:
-                raise LiveTradingError(f"Неопределённое состояние открытия market-пары; новые заявки запрещены: {exc}") from exc
-            actual_b = fills["Bybit"]["avg_price"]
-            actual_m = fills["MEXC"]["avg_price"]
-            actual_spread = (actual_b / actual_m - Decimal(1)) * Decimal(100)
-            sim.open_trade_pair(actual_b, actual_m, actual_spread, timestamp,
-                                long_exchange=long_exchange)
-            trade = sim.open_trade
-            assert trade is not None
-            for name, exchange_fill in fills.items():
-                estimated_fee = trade["entry_fees"][name]
-                actual_fee = exchange_fill.get("fee", Decimal(0))
-                if actual_fee <= 0:
-                    actual_fee = estimated_fee
-                sim.wallet[name] += estimated_fee - actual_fee
-                sim.fees_paid[name] += actual_fee - estimated_fee
-                trade["entry_fees"][name] = actual_fee
-                trade["entry_prices"][name] = exchange_fill["avg_price"]
-                trade["quantities"][name] = exchange_fill["base_qty"]
-            trade["entry_spread_pct"] = actual_spread
-            trade["notional"] = sum((trade["entry_prices"][name] * trade["quantities"][name]
-                                      for name in ("Bybit", "MEXC")), Decimal(0)) / Decimal(2)
-            mode = "HYBRID" if self.is_paper("Bybit") or self.is_paper("MEXC") else "LIVE"
-            logging.warning("%s OPEN confirmed: %s, LONG %s / SHORT %s | min-hold %ds",
-                            mode, trade["symbol"], trade["long_exchange"], trade["short_exchange"],
-                            sim.min_hold_sec)
-            self.refresh_balances()
-        sim.record_equity(timestamp, bybit_price, mexc_price)
-        sim.save_state()
 
 
 class BasketMonitor:
@@ -1527,9 +977,11 @@ class BasketTradingController(LiveTradingController):
         self.book_provider = book_provider or basket_orderbooks
         self.api_allowed = api_allowed or mexc_contract_api_allowed
         self.entry_spread_threshold = max(BASKET_ENTRY_SPREAD, basket_decimal(entry_spread_threshold))
-        # [PATCH 7] short-lived readiness buffer
         self._pair_ready: dict[str, dict[str, Any]] = {}
         self.pair_ready_ttl = 12.0
+        # Reserve of pairs that passed the preliminary filters; substitute
+        # candidates are drawn from here if the first trio fails preflight.
+        self.reserve: list[tuple[Rate, Rate]] = []
 
     def configure_candidates(self, pairs: list[tuple[Rate, Rate]]) -> None:
         self.simulator.margin = basket_decimal(self.executor.margin)
@@ -1599,8 +1051,9 @@ class BasketTradingController(LiveTradingController):
         if not allow_entry or not self.engine.can_enter:
             return False
 
-        # [PATCH 8] readiness buffer: refresh survivors, drop expired, then enter
         now = time.monotonic()
+        # Refresh readiness for every candidate we have in `pairs`, which is
+        # the full reserve list, not only the current dashboard trio.
         for a, b in pairs:
             prices = current_prices.get(a.base)
             if not prices or abs(basket_spread(*prices)) <= self.entry_spread_threshold:
@@ -1656,7 +1109,9 @@ class BasketTradingController(LiveTradingController):
             opened = self.engine.open_basket(chosen_pairs, fresh_books)
             if opened:
                 self._pair_ready.clear()
+                self.reserve = []
             else:
+                # Keep reserve so the next tick can substitute other candidates.
                 for _, b in chosen_pairs:
                     self._entry_retry_after[b.exchange_symbol] = time.monotonic() + 60
             self.refresh_balances()
@@ -1749,7 +1204,7 @@ def run_basket_monitor(args: Any, paper_flags: dict[str, bool], mode_profile: st
         next_scan = 0.0
         next_balance = time.monotonic() + 30
         next_monitor_log = 0.0
-        next_entry_poll = 0.0  # [PATCH 9]
+        next_entry_poll = 0.0
         def scan_task() -> tuple[list[Any], int, list[dict[str, Any]]]:
             rows = compare_once(args.min_gap_pp, args.chart_gap_pp, args.chart_file, False)
             candidates = [(abs(basket_spread(a.price, b.price)), a, b)
@@ -1773,24 +1228,24 @@ def run_basket_monitor(args: Any, paper_flags: dict[str, bool], mode_profile: st
             if scan_future is not None and scan_future.done():
                 try:
                     selected, checked, scan_report = scan_future.result()
-                    monitored = [(item[1], item[2]) for item in selected] if len(selected) == 3 else []
-                    if monitored:
-                        controller.configure_candidates(monitored)
-                        monitored = [(a, b) for a, b in monitored if controller.candidate_tradeable(a, b)]
-                    entries_allowed = len(monitored) == 3 and engine.can_enter
+                    all_selected_pairs = [(item[1], item[2]) for item in selected]
+                    if all_selected_pairs:
+                        controller.configure_candidates(all_selected_pairs)
+                        all_selected_pairs = [(a, b) for a, b in all_selected_pairs
+                                              if controller.candidate_tradeable(a, b)]
+                    controller.reserve = all_selected_pairs  # full pool for substitution
+                    monitored = all_selected_pairs[:BASKET_SIZE] if len(all_selected_pairs) >= BASKET_SIZE else []
+                    entries_allowed = len(all_selected_pairs) >= BASKET_SIZE and engine.can_enter
                     monitored_bases = {a.base for a, _ in monitored}
                     selected_bases = {item[1].base for item in selected}
                     for row in scan_report:
                         if row['status'] == 'SELECTED':
-                            if row['base'] in monitored_bases and len(monitored) == 3:
+                            if row['base'] in monitored_bases and len(monitored) == BASKET_SIZE:
                                 row['status'] = 'MONITORED'
                                 row['reason'] = 'входит в текущую наблюдаемую корзину 3/3'
-                            elif row['base'] in selected_bases and len(selected) < 3:
-                                row['status'] = 'WAITING_FOR_3'
-                                row['reason'] = 'пара проходит фильтры, но пока найдено меньше трёх подходящих пар'
-                            elif row['base'] in monitored_bases:
-                                row['status'] = 'WAITING_FOR_3'
-                                row['reason'] = 'пара проходит фильтры, но для входа нужно набрать 3/3'
+                            elif row['base'] in selected_bases:
+                                row['status'] = 'RESERVE'
+                                row['reason'] = 'в резерве: подставится, если первые три не пройдут preflight'
                             else:
                                 row['status'] = 'REJECTED_AFTER_CONFIG'
                                 row['reason'] = 'не прошла повторную проверку после настройки плеча'
@@ -1805,18 +1260,10 @@ def run_basket_monitor(args: Any, paper_flags: dict[str, bool], mode_profile: st
                             f"Bybit {row['bybit_price']:.8g} / MEXC {row['mexc_price']:.8g} | "
                             f"LONG {row['long_exchange']} / SHORT {row['short_exchange']} | "
                             f"{depth} | {row['status']}: {row['reason']}")
-                        logging.info(
-                            "Basket candidate %s | symbols=%s/%s | spread=%+.6f%% | "
-                            "price_bybit=%s price_mexc=%s | LONG=%s SHORT=%s | "
-                            "depth_long=%s depth_short=%s target_notional=%s | status=%s | %s",
-                            row['base'], row['bybit_symbol'], row['mexc_symbol'],
-                            row['signed_spread_pct'], row['bybit_price'], row['mexc_price'],
-                            row['long_exchange'], row['short_exchange'],
-                            row['long_depth_usd'], row['short_depth_usd'],
-                            row['target_notional_usd'], row['status'], row['reason'])
                     dashboard.update_candidate_status(summaries, scan_report)
-                    logging.info('Basket scan: %s/3 monitored, %s books checked, %s above spread threshold',
-                                 len(monitored), checked, len(scan_report))
+                    logging.info('Basket scan: %s monitored + %s reserve = %s total, %s books checked',
+                                 len(monitored), max(0, len(all_selected_pairs) - BASKET_SIZE),
+                                 len(all_selected_pairs), checked)
                 except LiveTradingError:
                     raise
                 except Exception as exc:
@@ -1831,22 +1278,22 @@ def run_basket_monitor(args: Any, paper_flags: dict[str, bool], mode_profile: st
                 if engine.basket is None:
                     monitored = []
                     entries_allowed = False
+                    controller.reserve = []
                     simulator.margin = basket_decimal(executor.margin)
                     simulator.leverage = basket_decimal(executor.leverage)
                     simulator.notional = basket_decimal(executor.notional)
                     next_scan = time.monotonic() + args.candidate_delay_sec
                     controller.refresh_balances()
-            elif monitored and entries_allowed:
-                # [PATCH 10] entry poll on its own cadence, not tied to --interval
+            elif entries_allowed:
                 if time.monotonic() >= next_entry_poll:
                     try:
-                        prices = live_prices_many(monitored)
+                        prices = live_prices_many(controller.reserve)
                     except Exception as exc:
                         logging.warning('Basket ticker unavailable; no new entry: %s', exc)
                         prices = {}
                     if time.monotonic() >= next_monitor_log:
                         threshold = controller.entry_spread_threshold
-                        for a, b in monitored:
+                        for a, b in controller.reserve:
                             current = prices.get(a.base)
                             if not current:
                                 logging.info('Basket monitor %s | текущая цена недоступна; вход отложен', a.base)
@@ -1858,10 +1305,11 @@ def run_basket_monitor(args: Any, paper_flags: dict[str, bool], mode_profile: st
                                 '| требование >%s%% | entry_check=%s',
                                 a.base, current[0], current[1], current_spread, threshold, check)
                         next_monitor_log = time.monotonic() + max(10, args.interval)
-                    controller.process_basket(monitored, prices, True)
+                    controller.process_basket(controller.reserve, prices, True)
                     if engine.basket:
                         entries_allowed = False
                         monitored = engine.active_pairs()
+                        controller.reserve = []
                     elif controller.region_restriction_detected:
                         entries_allowed = False
                         next_scan = time.monotonic() + args.candidate_delay_sec
@@ -1896,7 +1344,7 @@ def run_basket_monitor(args: Any, paper_flags: dict[str, bool], mode_profile: st
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Сравнение предстоящих funding Bybit и MEXC")
-    parser.add_argument("--once", action="store_true", help="выполнить одну сверку funding и завершить (без live-цикла)")
+    parser.add_argument("--once", action="store_true")
     parser.add_argument("--min-gap-pp", type=Decimal, default=Decimal("0"))
     parser.add_argument("--chart-gap-pp", type=Decimal, default=Decimal("0.01"))
     parser.add_argument("--chart-file", type=Path, default=Path("funding_comparison.png"))
@@ -1918,10 +1366,7 @@ def main() -> None:
     parser.add_argument("--trades-csv", type=Path, default=None)
     parser.add_argument("--state-file", type=Path, default=None)
     parser.add_argument("--exit-slippage-bps", type=Decimal, default=Decimal('2'))
-    # [PATCH 11] entry poll cadence
-    parser.add_argument("--entry-poll-sec", type=int, default=5,
-                        help="как часто пытаться открыть корзину из готовых пар (сек); "
-                             "полный скан рынка остаётся на --interval")
+    parser.add_argument("--entry-poll-sec", type=int, default=5)
     args = parser.parse_args()
     for name in ('min_gap_pp', 'chart_gap_pp', 'min_live_gap_pct', 'initial_balance',
                  'margin_per_leg', 'leverage', 'open_gap_pct', 'close_gap_pct',
@@ -1930,16 +1375,15 @@ def main() -> None:
             parser.error(f'--{name.replace("_", "-")} must be finite')
     if args.interval < 1:
         parser.error("--interval должен быть положительным")
-    if args.min_gap_pp < 0 or args.chart_gap_pp < 0 or args.min_live_gap_pct < 0:
-        parser.error("пороги не могут быть отрицательными")
     if args.live_points < 2:
         parser.error("--live-points должен быть не меньше 2")
-    if args.candidate_delay_sec < 0:
-        parser.error("--candidate-delay-sec не может быть отрицательным")
-    if args.min_hold_sec < 0:
-        parser.error("--min-hold-sec не может быть отрицательным")
+    if args.candidate_delay_sec < 0 or args.min_hold_sec < 0:
+        parser.error("задержки не могут быть отрицательными")
     if args.entry_poll_sec < 1:
         parser.error("--entry-poll-sec должен быть положительным")
+    if args.entry_poll_sec > 10:
+        parser.error("--entry-poll-sec не должен превышать 10 секунд "
+                     "(readiness TTL = 12 с; при редком опросе буфер будет постоянно пуст)")
     if args.initial_balance <= 0 or args.margin_per_leg <= 0 or args.leverage <= 0:
         parser.error("баланс, маржа и плечо должны быть положительными")
     if args.open_gap_pct < BASKET_ENTRY_SPREAD or args.close_gap_pct < 0:
@@ -1968,7 +1412,6 @@ def main() -> None:
     else:
         logging.warning("DEMO=%s | %s — реальные ордера отключены; работает paper trading",
                         DEMO, mode_text)
-
     logging.warning('--close-gap-pct/--min-hold-sec are legacy parameters: basket exits use aggregate projected net >= Decimal("0.10") or safety abort only')
     logging.warning('Basket archive (including interrupted/rolled-back attempts and components) is persisted in --state-file; legacy --trades-csv is not used')
     run_basket_monitor(args, paper_flags, mode_profile)

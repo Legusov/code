@@ -92,7 +92,7 @@ def load_keys(bybit_required: bool = True, mexc_required: bool = True) -> tuple[
     if not bybit_required and not mexc_required:
         return "", "", "", ""
     try:
-        import key  # user's local, untracked key.py
+        import key
     except ImportError as exc:
         raise LiveTradingError("Для выбранной live-биржи создайте локальный key.py по примеру key.py.example") from exc
     values = (
@@ -107,7 +107,7 @@ def load_keys(bybit_required: bool = True, mexc_required: bool = True) -> tuple[
     if not all(isinstance(v, str) and v.strip() and "PASTE_" not in v for v in required):
         exchanges = " и ".join(name for name, active in (("Bybit", bybit_required), ("MEXC", mexc_required)) if active)
         raise LiveTradingError(f"В key.py задайте API-поля только для live-биржи(бирж): {exchanges}; ключи не печатаются в лог")
-    return tuple(v.strip() for v in values)  # type: ignore[return-value]
+    return tuple(v.strip() for v in values)
 
 
 class BybitREST:
@@ -640,8 +640,7 @@ class LiveExecution:
             )
         required = self.margin * Decimal("1.10")
         balances = self.balance_snapshot()
-        if any(balances.get(name, Decimal(0)) < required for name, paper in
-               (("Bybit", self.bybit_paper), ("MEXC", self.mexc_paper)) if not paper):
+        if any(balances.get(name, Decimal(0)) < required for name, paper in               (("Bybit", self.bybit_paper), ("MEXC", self.mexc_paper)) if not paper):
             details = ", ".join(f"{name} ${balances.get(name, Decimal(0)):.2f}"
                                  for name, paper in (("Bybit", self.bybit_paper), ("MEXC", self.mexc_paper))
                                  if not paper)
@@ -901,7 +900,6 @@ class LiveExecution:
         return False
 
 
-# [PATCH 1] New sanity constants for instrument equivalence and depth.
 BASKET_SIZE = 3
 BASKET_ENTRY_SPREAD = Decimal('0.5')  # percent, STRICTLY greater
 BASKET_MAX_SPREAD = Decimal('5')      # hard sanity ceiling; >5% = mismatched instruments
@@ -1278,7 +1276,6 @@ class BasketExecution:
             spread = basket_spread(a.price, b.price)
             if a.base != b.base or abs(spread) <= BASKET_ENTRY_SPREAD:
                 raise LiveTradingError('Every entry price spread must be strictly > 0.5%')
-            # [PATCH 2] sanity ceiling and ticker-ratio check
             if abs(spread) > BASKET_MAX_SPREAD:
                 raise LiveTradingError(
                     f"{a.base}: ticker spread {spread:+.4f}% exceeds sanity ceiling "
@@ -1288,7 +1285,6 @@ class BasketExecution:
                 raise LiveTradingError(
                     f"{a.base}: ticker price ratio {ratio:.6f} deviates >"
                     f"{MAX_TICKER_RATIO_DEVIATION * 100}% — likely different instruments")
-            # [PATCH 2 end]
             if not self.executor.pair_is_tradeable(a, b):
                 raise LiveTradingError('Pair fails size/leverage/region preflight')
             qty = {}
@@ -1319,7 +1315,6 @@ class BasketExecution:
                     base_qty = basket_decimal(pair['planned_qty'][name])
                     if name == 'MEXC':
                         base_qty *= basket_decimal(pair['rates'][name]['contract_size'])
-                    # [PATCH 3] require depth with safety multiple
                     leg_notional = basket_decimal(self.executor.notional)
                     side_levels = book['asks'] if buy else book['bids']
                     side_notional = sum(
@@ -1329,7 +1324,6 @@ class BasketExecution:
                         raise LiveTradingError(
                             f"visible depth ${side_notional:.4f} < "
                             f"{DEPTH_SAFETY_MULTIPLIER}x notional ${leg_notional:.4f}")
-                    # [PATCH 3 end]
                     prices[name] = depth_vwap(side_levels, base_qty, buy)
             except Exception as exc:
                 logging.warning(
@@ -1340,7 +1334,6 @@ class BasketExecution:
                 failures.append(f"{pair['base']}: VWAP unavailable ({type(exc).__name__}: {exc})")
                 continue
             executable = basket_spread(prices['Bybit'], prices['MEXC'])
-            # [PATCH 4] sanity ceiling on executable VWAP spread
             if abs(executable) > BASKET_MAX_SPREAD:
                 logging.warning(
                     'Basket VWAP preflight %s | executable_spread=%+.4f%% exceeds ceiling %s%% '
@@ -1350,7 +1343,6 @@ class BasketExecution:
                     f"{pair['base']}: executable spread {executable:+.4f}% > "
                     f"ceiling {BASKET_MAX_SPREAD}%")
                 continue
-            # [PATCH 4 end]
             passes = (abs(executable) > BASKET_ENTRY_SPREAD and
                       (executable < 0) == (pair['long_exchange'] == 'Bybit'))
             status = 'PASS' if passes else 'BLOCK'
@@ -1413,6 +1405,11 @@ class BasketExecution:
                 spread = basket_spread(fills['Bybit']['avg_price'], fills['MEXC']['avg_price'])
                 if abs(spread) <= BASKET_ENTRY_SPREAD or (spread < 0) != (pair['long_exchange'] == 'Bybit'):
                     raise EntryRejectedAfterRollback('Actual basket entry fill spread is not strictly > 0.5%')
+                # NEW: upper sanity bound on the ACTUAL fill, not only on ticker/VWAP
+                if abs(spread) > BASKET_MAX_SPREAD:
+                    raise EntryRejectedAfterRollback(
+                        f'Actual fill spread {spread:+.4f}% exceeds sanity ceiling '
+                        f'{BASKET_MAX_SPREAD}% — likely mismatched instruments or violent slippage')
                 self.save_state()
             for pair in plan:
                 for name in EXCHANGES:
