@@ -323,12 +323,11 @@ def select_liquid_candidates(price_candidates: list[tuple[Decimal, Rate, Rate]],
                 report.append(row)
             continue
         if len(selected) >= limit:
-            # NOTE: cap only the *monitored trio* for dashboard readability;
-            # still evaluate the reserve up to a hard ceiling so the controller
-            # can substitute after a VWAP rejection.
-            if len(selected) >= limit * 3:
+            # [FIX 5] Reserve cap = limit*2 (6). 6 pairs × ~1-2s API latency fits
+            # within pair_ready_ttl=20s; 9 pairs would systematically expire.
+            if len(selected) >= limit * 2:
                 row["status"] = "NOT_CHECKED_LIMIT"
-                row["reason"] = f"уже проверено {limit * 3} пар; резерв больше не набирается"
+                row["reason"] = f"уже проверено {limit * 2} пар; резерв больше не набирается"
                 if report is not None:
                     report.append(row)
                 continue
@@ -444,13 +443,6 @@ class PaperSimulator:
         if not self.load_state():
             self.recover_from_csv()
         self.save_state()
-
-    # The PaperSimulator methods are identical to the original source and are
-    # not called from run_basket_monitor(); see the previous version for the
-    # body of load_state / recover_from_csv / save_state / process_prices /
-    # open_trade_pair / pnl_by_exchange / exit_fees / close_trade /
-    # save_record / equity / record_equity / summary / execution_mode_text.
-    # They are kept here for legacy ledger migration only.
 
     def load_state(self) -> bool:
         if not self.state_file.exists():
@@ -978,7 +970,8 @@ class BasketTradingController(LiveTradingController):
         self.api_allowed = api_allowed or mexc_contract_api_allowed
         self.entry_spread_threshold = max(BASKET_ENTRY_SPREAD, basket_decimal(entry_spread_threshold))
         self._pair_ready: dict[str, dict[str, Any]] = {}
-        self.pair_ready_ttl = 12.0
+        # [FIX 1] TTL 20s: 6 reserve pairs × ~1-2s per-pair API latency fits budget.
+        self.pair_ready_ttl = 20.0
         # Reserve of pairs that passed the preliminary filters; substitute
         # candidates are drawn from here if the first trio fails preflight.
         self.reserve: list[tuple[Rate, Rate]] = []
@@ -1051,9 +1044,8 @@ class BasketTradingController(LiveTradingController):
         if not allow_entry or not self.engine.can_enter:
             return False
 
-        now = time.monotonic()
-        # Refresh readiness for every candidate we have in `pairs`, which is
-        # the full reserve list, not only the current dashboard trio.
+        # [FIX 2] Anchor each pair's expiry to the moment its own check finished,
+        # not the tick's start, so a slow API does not expire earlier pairs.
         for a, b in pairs:
             prices = current_prices.get(a.base)
             if not prices or abs(basket_spread(*prices)) <= self.entry_spread_threshold:
@@ -1081,9 +1073,10 @@ class BasketTradingController(LiveTradingController):
                 continue
             self._pair_ready[current_a.base] = {
                 'a': current_a, 'b': current_b, 'books': books_one,
-                'expires_at': now + self.pair_ready_ttl,
+                'expires_at': time.monotonic() + self.pair_ready_ttl,
             }
 
+        now = time.monotonic()
         for base in [k for k, v in self._pair_ready.items() if v['expires_at'] <= now]:
             self._pair_ready.pop(base, None)
 
@@ -1094,6 +1087,10 @@ class BasketTradingController(LiveTradingController):
                 logging.info('Basket readiness: %d/%d pairs ready (ttl=%.0fs)',
                              len(ready), BASKET_SIZE, self.pair_ready_ttl)
             return False
+        # [FIX 6] Log the full-trio event too; previous code went silent here.
+        logging.info('Basket readiness: %d candidates eligible; choosing top %d '
+                     'and running fresh preflight before submission',
+                     len(ready), BASKET_SIZE)
         chosen = ready[:BASKET_SIZE]
         chosen_pairs = [(v['a'], v['b']) for _, v in chosen]
         try:
@@ -1111,7 +1108,10 @@ class BasketTradingController(LiveTradingController):
                 self._pair_ready.clear()
                 self.reserve = []
             else:
-                # Keep reserve so the next tick can substitute other candidates.
+                # [FIX 3] Remove the rejected trio so the next tick actually
+                # picks reserve candidates instead of retrying the same set.
+                for base, _ in chosen:
+                    self._pair_ready.pop(base, None)
                 for _, b in chosen_pairs:
                     self._entry_retry_after[b.exchange_symbol] = time.monotonic() + 60
             self.refresh_balances()
@@ -1119,11 +1119,19 @@ class BasketTradingController(LiveTradingController):
         except MexcRegionRestrictedError as exc:
             self.region_restriction_detected = True
             self._block_mexc_region_symbol(exc.symbol, 'order API code 8950')
+            # [FIX 3] Also drop this trio from readiness so reserve can be chosen.
+            for base, _ in chosen:
+                self._pair_ready.pop(base, None)
             return False
         except LiveTradingError:
             if self.engine.halted or self.engine.basket:
                 raise
-            logging.warning('Basket aggregate balance/size preflight rejected entry')
+            # [FIX 3] No orders were sent, but exclude this exact trio so the
+            # next tick draws from reserve instead of looping on the same set.
+            for base, _ in chosen:
+                self._pair_ready.pop(base, None)
+            logging.warning('Basket aggregate balance/size preflight rejected entry; '
+                            'this trio excluded, reserve remains eligible')
             return False
 
 
@@ -1261,7 +1269,8 @@ def run_basket_monitor(args: Any, paper_flags: dict[str, bool], mode_profile: st
                             f"LONG {row['long_exchange']} / SHORT {row['short_exchange']} | "
                             f"{depth} | {row['status']}: {row['reason']}")
                     dashboard.update_candidate_status(summaries, scan_report)
-                    logging.info('Basket scan: %s monitored + %s reserve = %s total, %s books checked',
+                    # [FIX 5] "pairs checked" — each pair fetches 2 orderbooks.
+                    logging.info('Basket scan: %s monitored + %s reserve = %s total, %s pairs checked',
                                  len(monitored), max(0, len(all_selected_pairs) - BASKET_SIZE),
                                  len(all_selected_pairs), checked)
                 except LiveTradingError:
@@ -1381,9 +1390,10 @@ def main() -> None:
         parser.error("задержки не могут быть отрицательными")
     if args.entry_poll_sec < 1:
         parser.error("--entry-poll-sec должен быть положительным")
-    if args.entry_poll_sec > 10:
-        parser.error("--entry-poll-sec не должен превышать 10 секунд "
-                     "(readiness TTL = 12 с; при редком опросе буфер будет постоянно пуст)")
+    # [FIX 4] TTL is 20s; reserve capped at 6 pairs; allow up to 15s poll.
+    if args.entry_poll_sec > 15:
+        parser.error("--entry-poll-sec не должен превышать 15 секунд "
+                     "(readiness TTL = 20 с, резерв ограничен 6 парами)")
     if args.initial_balance <= 0 or args.margin_per_leg <= 0 or args.leverage <= 0:
         parser.error("баланс, маржа и плечо должны быть положительными")
     if args.open_gap_pct < BASKET_ENTRY_SPREAD or args.close_gap_pct < 0:

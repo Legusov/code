@@ -1405,7 +1405,7 @@ class BasketExecution:
                 spread = basket_spread(fills['Bybit']['avg_price'], fills['MEXC']['avg_price'])
                 if abs(spread) <= BASKET_ENTRY_SPREAD or (spread < 0) != (pair['long_exchange'] == 'Bybit'):
                     raise EntryRejectedAfterRollback('Actual basket entry fill spread is not strictly > 0.5%')
-                # NEW: upper sanity bound on the ACTUAL fill, not only on ticker/VWAP
+                # [FIX] Upper sanity bound on the ACTUAL fill, not only ticker/VWAP.
                 if abs(spread) > BASKET_MAX_SPREAD:
                     raise EntryRejectedAfterRollback(
                         f'Actual fill spread {spread:+.4f}% exceeds sanity ceiling '
