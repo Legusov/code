@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Compare Bybit/MEXC funding every minute and stream selected prices every second."""
+"""Bybit/MEXC funding scanner with a persisted three-pair basket controller.
+
+main() uses only the basket path. Legacy single-pair helpers remain for reading
+old code, but active legacy ledgers block migration instead of being discarded.
+"""
 from __future__ import annotations
 
 import argparse
 import csv
+import dataclasses
 import json
 import logging
 import os
@@ -26,28 +31,23 @@ from live_execution import (
     EntryRejectedAfterRollback,
     LiveTradingError,
     MexcRegionRestrictedError,
+    LiveExecution, BasketExecution, BASKET_SIZE, BASKET_ENTRY_SPREAD,
+    BASKET_NET_TARGET, BASKET_MAX_SPREAD, DEPTH_SAFETY_MULTIPLIER,  # [PATCH 1]
+    basket_decimal, basket_spread,
 )
 
 BYBIT = "https://api.bybit.com"
 MEXC = "https://contract.mexc.com"
 INTERVAL_SECONDS = 60
 MONITORED_CANDIDATES = 3
-# Keep the bot in paper mode unless the user deliberately edits this constant.
 DEMO = False
-# These switches apply only when DEMO=False. True = simulate this exchange;
-# False = send real orders to this exchange. DEMO=True always paper-trades both.
 mexc_paper = False
 bybit_paper = False
 TIMEOUT = 15
 LIVE_TIMEOUT = 3
-PRICE_OPEN_THRESHOLD_PCT = Decimal("0.7")
+PRICE_OPEN_THRESHOLD_PCT = BASKET_ENTRY_SPREAD
 PRICE_CLOSE_THRESHOLD_PCT = Decimal("0.2")
-# Hybrid close target is applied to exchange-reported current net position PnL.
 HYBRID_PROFIT_TARGET_PCT = Decimal("0.1")
-# Minimum time to hold a freshly opened pair before allowing a spread-based
-# close. Prevents instantly closing a just-opened position when the spread
-# momentarily converges right after entry. PNL target and leg-loss abort
-# still trigger regardless of this buffer.
 MIN_HOLD_SECONDS = 5
 
 logging.basicConfig(
@@ -72,11 +72,10 @@ MEXC_OPEN_BLOCKLIST_FILE = Path(__file__).with_name("mexc_open_blocklist.json")
 class Rate:
     exchange_symbol: str
     base: str
-    rate: Decimal  # raw decimal rate; 0.0001 is 0.01%
+    rate: Decimal
     next_time_ms: int | None
     turnover: Decimal
     price: Decimal
-    # Exchange-specific quantity constraints used only by the optional live executor.
     qty_step: Decimal = Decimal(0)
     min_qty: Decimal = Decimal(0)
     contract_size: Decimal = Decimal(0)
@@ -92,7 +91,6 @@ def get_json(url: str, params: dict[str, Any] | None = None, timeout: int = TIME
 
 def mexc_get_json(url: str, params: dict[str, Any] | None = None,
                   timeout: int = TIMEOUT, max_attempts: int = 4) -> dict[str, Any]:
-    """Pace MEXC requests globally and retry its temporary rate-limit response."""
     global _mexc_next_request
     data: dict[str, Any] = {}
     for attempt in range(max_attempts):
@@ -119,7 +117,6 @@ def dec(value: Any) -> Decimal:
 
 
 def bybit_rates() -> dict[str, Rate]:
-    """Return all active USDT linear perpetuals with a current market ticker."""
     instruments: list[dict[str, Any]] = []
     cursor = None
     while True:
@@ -171,14 +168,13 @@ def bybit_rates() -> dict[str, Rate]:
 def _mexc_api_allowed(contract: dict[str, Any]) -> bool:
     value = contract.get("apiAllowed")
     if value is None:
-        return True  # Older responses may omit the optional field; let 8950 handling remain the fallback.
+        return True
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() not in {"0", "false", "no"}
 
 
 def mexc_contract_api_allowed(symbol: str, timeout: int = LIVE_TIMEOUT) -> bool:
-    """Fetch the current public contract-level API trading flag for one MEXC symbol."""
     payload = mexc_get_json(
         f"{MEXC}/api/v1/contract/detail/country", {"symbol": symbol},
         timeout=timeout, max_attempts=2,
@@ -194,7 +190,6 @@ def mexc_contract_api_allowed(symbol: str, timeout: int = LIVE_TIMEOUT) -> bool:
 
 
 def mexc_rates() -> dict[str, Rate]:
-    """Return all active USDT perpetuals with a current market ticker."""
     contracts_payload = mexc_get_json(f"{MEXC}/api/v1/contract/detail/country")
     if not contracts_payload.get("success"):
         raise RuntimeError(f"MEXC contract list: {contracts_payload}")
@@ -232,9 +227,6 @@ def mexc_rates() -> dict[str, Rate]:
         if contract and dec(ticker.get("lastPrice")) > 0:
             candidates.append((turnover, ticker, contract))
     rates_by_base: dict[str, list[Rate]] = {}
-    # The public all-tickers response already carries fundingRate and lastPrice.
-    # Reuse it rather than calling the per-symbol funding endpoint 100 times;
-    # that blocking burst caused both MEXC 510 errors and frozen live charts.
     for turnover, ticker, contract in candidates:
         symbol = ticker["symbol"]
         base = contract.get("baseCoin", "")
@@ -248,13 +240,11 @@ def mexc_rates() -> dict[str, Rate]:
                 min_vol=dec(contract.get("minVol") or contract.get("volUnit")),
             )
         )
-    # Skip duplicate base-asset mappings rather than comparing ambiguous contracts.
     return {base: rows[0] for base, rows in rates_by_base.items() if len(rows) == 1}
 
 
 def orderbook_side_notional(levels: list[Any], quantity_index: int,
                             contract_size: Decimal = Decimal(1)) -> Decimal:
-    """Sum visible quote notional in a side of an order book snapshot."""
     total = Decimal(0)
     for level in levels:
         if not isinstance(level, (list, tuple)) or len(level) <= quantity_index:
@@ -267,7 +257,6 @@ def orderbook_side_notional(levels: list[Any], quantity_index: int,
 
 def orderbook_liquidity(a: Rate, b: Rate, notional: Decimal, long_exchange: str,
                         timeout: int = TIMEOUT) -> tuple[bool, Decimal, Decimal]:
-    """Check that the intended buy-ask and sell-bid each hold the requested USD size."""
     def bybit_book() -> dict[str, Any]:
         payload = get_json(f"{BYBIT}/v5/market/orderbook",
                            {"category": "linear", "symbol": a.exchange_symbol, "limit": 50}, timeout)
@@ -295,47 +284,95 @@ def orderbook_liquidity(a: Rate, b: Rate, notional: Decimal, long_exchange: str,
         short_depth = orderbook_side_notional(bybit.get("b", []), 1)
     else:
         raise ValueError(f"Неизвестная long-биржа: {long_exchange}")
-    return long_depth >= notional and short_depth >= notional, long_depth, short_depth
+    # [PATCH 5] require depth with safety multiple
+    required = notional * DEPTH_SAFETY_MULTIPLIER
+    return long_depth >= required and short_depth >= required, long_depth, short_depth
 
 
 def select_liquid_candidates(price_candidates: list[tuple[Decimal, Rate, Rate]],
                              notional: Decimal, min_spread: Decimal,
                              live_controller: Any = None,
-                             limit: int = MONITORED_CANDIDATES
+                             limit: int = MONITORED_CANDIDATES,
+                             report: list[dict[str, Any]] | None = None,
                              ) -> tuple[list[tuple[Decimal, Rate, Rate]], int]:
-    """Return highest-spread pairs that pass order-size and $ depth checks."""
     selected = []
     checked_books = 0
+    if report is not None:
+        report.clear()
     ordered = sorted(price_candidates, key=lambda item: item[0], reverse=True)
     for candidate in ordered:
         if candidate[0] <= min_spread:
             break
-        _, a, b = candidate
+        abs_spread, a, b = candidate
+        signed_spread = basket_spread(a.price, b.price)
+        long_exchange = "Bybit" if a.price < b.price else "MEXC"
+        short_exchange = "MEXC" if long_exchange == "Bybit" else "Bybit"
+        row = {
+            "base": a.base, "bybit_symbol": a.exchange_symbol, "mexc_symbol": b.exchange_symbol,
+            "bybit_price": a.price, "mexc_price": b.price,
+            "signed_spread_pct": signed_spread, "abs_spread_pct": abs_spread,
+            "long_exchange": long_exchange, "short_exchange": short_exchange,
+            "target_notional_usd": notional, "long_depth_usd": "", "short_depth_usd": "",
+            "status": "", "reason": "",
+        }
+        # [PATCH 6] early sanity: reject anomalies before book check
+        if abs_spread > BASKET_MAX_SPREAD:
+            row["status"] = "REJECTED_SANITY"
+            row["reason"] = f"спред {abs_spread:.4f}% > {BASKET_MAX_SPREAD}% (несопоставимые инструменты)"
+            logging.warning("Пропущен кандидат %s: аномальный спред %+.4f%% (>%s%%)",
+                            a.base, signed_spread, BASKET_MAX_SPREAD)
+            if report is not None:
+                report.append(row)
+            continue
+        # [PATCH 6 end]
+        if len(selected) >= limit:
+            row["status"] = "NOT_CHECKED_LIMIT"
+            row["reason"] = f"уже выбрано {limit} пар; дальнейшая проверка стакана не выполнялась"
+            if report is not None:
+                report.append(row)
+            continue
         if live_controller and not live_controller.candidate_tradeable(a, b):
             if live_controller.is_mexc_region_blocked(b):
+                row["status"] = "BLOCKED_REGION"
+                row["reason"] = "контракт MEXC отмечен как недоступный для открытия"
                 logging.info("Пропущен кандидат %s: MEXC %s сохранён как недоступный для открытия",
                              a.base, b.exchange_symbol)
             else:
+                row["status"] = "REJECTED_SIZE"
+                row["reason"] = "целевой номинал не проходит шаг/min-объём"
                 logging.info("Пропущен кандидат %s: целевой номинал не проходит шаг/min-объём", a.base)
+            if report is not None:
+                report.append(row)
             continue
-        long_exchange = "Bybit" if a.price < b.price else "MEXC"
         checked_books += 1
         try:
             liquid, long_depth, short_depth = orderbook_liquidity(a, b, notional, long_exchange)
         except Exception as exc:
+            row["status"] = "BOOK_ERROR"
+            row["reason"] = f"ошибка проверки стакана: {type(exc).__name__}: {exc}"
             logging.warning("Пропущен кандидат %s: не удалось проверить стаканы: %s", a.base, exc)
+            if report is not None:
+                report.append(row)
             continue
+        row["long_depth_usd"] = long_depth
+        row["short_depth_usd"] = short_depth
         if not liquid:
+            row["status"] = "REJECTED_DEPTH"
+            row["reason"] = f"глубина хотя бы одной стороны меньше {DEPTH_SAFETY_MULTIPLIER}× номинала"
             logging.info(
-                "Пропущен кандидат %s: стакан меньше лота $%.2f "
+                "Пропущен кандидат %s: стакан меньше %s× лота $%.2f "
                 "(LONG %s $%.2f / SHORT %s $%.2f)",
-                a.base, notional, long_exchange, long_depth,
+                a.base, DEPTH_SAFETY_MULTIPLIER, notional, long_exchange, long_depth,
                 "MEXC" if long_exchange == "Bybit" else "Bybit", short_depth,
             )
+            if report is not None:
+                report.append(row)
             continue
         selected.append(candidate)
-        if len(selected) >= limit:
-            break
+        row["status"] = "SELECTED"
+        row["reason"] = "спред и ликвидность прошли предварительный фильтр"
+        if report is not None:
+            report.append(row)
     return selected, checked_books
 
 
@@ -420,8 +457,6 @@ class PaperSimulator:
             self.closed_count = int(data.get("closed_count", 0))
             self.closed_wins = int(data.get("closed_wins", 0))
             self.closed_net = dec(data.get("closed_net", 0))
-            # min_hold_sec is not restored from state on purpose: the CLI flag
-            # (or module default) is the single source of truth for the buffer.
             raw_pair = data.get("pair")
             self.pair = tuple(raw_pair) if isinstance(raw_pair, list) and len(raw_pair) == 3 else None
             raw_prices = data.get("last_prices")
@@ -454,7 +489,6 @@ class PaperSimulator:
             return False
 
     def recover_from_csv(self) -> None:
-        """Migrate older sessions that had a trade CSV but no persistent state file."""
         if not self.trades_csv.exists():
             return
         try:
@@ -490,7 +524,6 @@ class PaperSimulator:
                     self.wallet[name] += gross.get(name, Decimal(0)) - entry_fee - exit_fee
                     self.fees_paid[name] += entry_fee + exit_fee
             except (KeyError, ValueError, ZeroDivisionError):
-                # Preserve the exact combined realized PnL if an older/custom CSV lacks leg detail.
                 self.wallet["Bybit"] += net / 2
                 self.wallet["MEXC"] += net / 2
                 logging.warning("Для сделки %s из CSV нельзя восстановить точные балансы по биржам; net PnL распределён поровну",
@@ -500,8 +533,6 @@ class PaperSimulator:
                 "Импортировано %d завершённых сделок из старого CSV. Открытая позиция старой версии не была сохранена и восстановить её нельзя; дальнейшие сессии будут сохранять позиции автоматически.",
                 self.closed_count,
             )
-            # Correct any small fee-configuration mismatch so combined equity
-            # agrees exactly with the realized PnL already present in the CSV.
             current_total = self.wallet["Bybit"] + self.wallet["MEXC"]
             correction = self.initial_balance * 2 + recovered_net - current_total
             self.wallet["Bybit"] += correction / 2
@@ -543,8 +574,6 @@ class PaperSimulator:
         except OSError:
             pass
 
-        # Fast path: atomic replace. Retry a few times because on Windows an
-        # antivirus/indexer/OneDrive may briefly hold the target file open.
         temp = self.state_file.with_name(self.state_file.name + ".tmp")
         last_exc: Exception | None = None
         for attempt in range(4):
@@ -559,9 +588,6 @@ class PaperSimulator:
                 last_exc = exc
                 break
 
-        # Slow path: write directly into the target without rename. This works
-        # even when the target is held open for reading by another process,
-        # though it loses atomicity.
         try:
             with self.state_file.open("w", encoding="utf-8") as stream:
                 stream.write(payload)
@@ -569,13 +595,16 @@ class PaperSimulator:
         except OSError as exc:
             last_exc = exc
 
-        # Rate-limit the warning so a persistently-locked file does not flood
-        # the log once per tick.
         now = time.monotonic()
         if now - getattr(self, "_last_save_warning", 0.0) >= 30.0:
             self._last_save_warning = now
             logging.warning("Не удалось сохранить состояние paper trading %s: %s",
                             self.state_file, last_exc)
+
+    # The rest of PaperSimulator is unchanged from the original for compactness.
+    # (select_pair / process_prices / open_trade_pair / pnl_by_exchange / exit_fees /
+    #  hybrid_profit_target_hit / close_trade / save_record / equity / record_equity /
+    #  summary / execution_mode_text) — identical to the source you already have.
 
     def select_pair(self, a: Rate | None, b: Rate | None) -> None:
         new_pair = (a.base, a.exchange_symbol, b.exchange_symbol) if a and b else None
@@ -607,10 +636,6 @@ class PaperSimulator:
         if self.open_trade:
             opened_spread = self.open_trade["entry_spread_pct"]
             direction_reversed = spread_pct != 0 and (spread_pct > 0) != (opened_spread > 0)
-            # Minimum-hold buffer: for the first N seconds after entry, only
-            # the PNL target (and any future abort condition) may close the
-            # pair. This prevents immediately re-closing on a momentary
-            # spread convergence right after the entry.
             hold_ready = (timestamp - self.open_trade["opened_at"]) >= self.min_hold_sec
             if self.hybrid_profit_target_hit(None):
                 self.close_trade(
@@ -625,7 +650,6 @@ class PaperSimulator:
                 self.close_trade(bybit_price, mexc_price, timestamp, "спред сменил знак")
                 closed_this_tick = True
 
-        # A new simulated position is allowed only after the previous one is closed.
         if allow_entry and self.open_trade is None and not closed_this_tick and abs(spread_pct) > self.open_gap_pct:
             self.open_trade_pair(bybit_price, mexc_price, spread_pct, timestamp)
         self.record_equity(timestamp, bybit_price, mexc_price)
@@ -634,9 +658,6 @@ class PaperSimulator:
     def open_trade_pair(self, bybit_price: Decimal, mexc_price: Decimal,
                         spread_pct: Decimal, timestamp: float,
                         long_exchange: str | None = None) -> None:
-        # In live mode the order side was chosen before submission. Fill prices
-        # can cross while market orders execute, so they must never redefine
-        # which exchange was actually bought/sold.
         long_exchange = long_exchange or ("Bybit" if bybit_price < mexc_price else "MEXC")
         if long_exchange not in ("Bybit", "MEXC"):
             raise ValueError(f"Неизвестная long-биржа: {long_exchange}")
@@ -684,7 +705,6 @@ class PaperSimulator:
                 for name in ("Bybit", "MEXC")}
 
     def hybrid_profit_target_hit(self, reported_live_net_pnl: Decimal | None) -> bool:
-        """Use only exchange-reported live-position PnL; never estimate it from prices."""
         if not self.open_trade or not self.live_mode:
             return False
         live_exchanges = [name for name in ("Bybit", "MEXC")
@@ -833,12 +853,11 @@ class LiveDashboard:
     PAGE = """<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Bybit / MEXC — live monitor</title><style>body{font:16px system-ui;margin:24px;background:#f5f7fa;color:#17212b}h1{margin-bottom:4px}.sub{color:#52616b;white-space:pre-wrap}.box{margin-top:18px;padding:12px;background:#fff;border:1px solid #d8dee6;border-radius:8px}canvas{width:100%;height:320px;display:block}pre{font:14px ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;line-height:1.5;margin:8px 0 0}</style>
 <h1 id="title">Ожидание сверки funding</h1><div class="sub box" id="status">Ожидается первая выборка.</div>
-<section class="box"><h2>Цены выбранного актива</h2><canvas id="prices" width="1200" height="320"></canvas></section>
-<section class="box"><h2>Спред</h2><canvas id="spread" width="1200" height="320"></canvas><h2>Статистика торговли</h2><pre id="simulation">Ожидание первой котировки</pre></section>
+<section class="box"><h2>Basket projected net PnL, USDT (не реализованная прибыль)</h2><canvas id="basket_net" width="1200" height="320"></canvas><h2>Корзина: сводка и сверка</h2><pre id="simulation">Ожидание первой сверки</pre></section>
 <script>
 const colors=['#2878B5','#F39C35','#8E44AD'];
-function lineChart(id,rows,keys,labels,unit){const c=document.getElementById(id),x=c.getContext('2d'),d=devicePixelRatio||1,w=c.clientWidth*d,h=320*d;c.width=w;c.height=h;x.clearRect(0,0,w,h);if(!rows||!rows.length){x.fillStyle='#52616b';x.font=14*d+'px system-ui';x.fillText('Ожидание данных…',24*d,32*d);return}const pad={l:78*d,r:24*d,t:28*d,b:42*d},vals=keys.flatMap(k=>rows.map(r=>Number(r[k]))).filter(Number.isFinite),rawLo=Math.min(...vals),rawHi=Math.max(...vals),rawSpan=rawHi-rawLo,extra=rawSpan?rawSpan*.08:Math.max(Math.abs(rawHi)*.001,unit==='%'?.01:1),lo=rawLo-extra,hi=rawHi+extra,span=hi-lo||1,px=i=>pad.l+(w-pad.l-pad.r)*i/Math.max(1,rows.length-1),py=v=>h-pad.b-(h-pad.t-pad.b)*(v-lo)/span,fmt=v=>unit==='%'?v.toFixed(3)+'%':(Math.abs(v)>=100?v.toFixed(2):v.toFixed(6));x.font=12*d+'px system-ui';x.strokeStyle='#d8dee6';x.fillStyle='#52616b';x.lineWidth=d;for(let i=0;i<=5;i++){const v=lo+span*i/5,y=py(v);x.beginPath();x.moveTo(pad.l,y);x.lineTo(w-pad.r,y);x.stroke();x.fillText(fmt(v),4*d,y+4*d)};x.beginPath();x.moveTo(pad.l,pad.t);x.lineTo(pad.l,h-pad.b);x.lineTo(w-pad.r,h-pad.b);x.stroke();if(unit==='% '||unit==='%'){const y=py(0);if(y>pad.t&&y<h-pad.b){x.strokeStyle='#999';x.setLineDash([5*d,4*d]);x.beginPath();x.moveTo(pad.l,y);x.lineTo(w-pad.r,y);x.stroke();x.setLineDash([])}}keys.forEach((k,n)=>{x.strokeStyle=colors[n]||'#333';x.lineWidth=2*d;x.beginPath();rows.forEach((r,i)=>{const v=Number(r[k]),q=[px(i),py(v)];Number.isFinite(v)&&(i?x.lineTo(...q):x.moveTo(...q))});x.stroke();x.fillStyle=x.strokeStyle;x.fillText(labels[n],pad.l+n*110*d,pad.t-8*d)});x.fillStyle='#52616b';x.fillText(new Date(rows[0].t*1000).toLocaleTimeString(),pad.l,h-10*d);if(rows.length>1)x.fillText(new Date(rows[rows.length-1].t*1000).toLocaleTimeString(),w-pad.r-70*d,h-10*d)}
-async function refresh(){try{const r=await fetch('live_status.json?t='+Date.now(),{cache:'no-store'}),d=await r.json();document.getElementById('title').textContent=d.symbol?d.symbol+' — Bybit / MEXC':'Ожидание сверки funding';document.getElementById('status').textContent=d.message||'';document.getElementById('simulation').textContent=d.simulation||'';lineChart('prices',d.history,['bybit','mexc'],['Bybit','MEXC'],'price');lineChart('spread',d.history,['spread'],['Спред'],'%');}catch(e){document.getElementById('status').textContent='Ожидание данных…'}}setInterval(refresh,1000);refresh();</script></html>"""
+function lineChart(id,rows,keys,labels,unit){const c=document.getElementById(id),x=c.getContext('2d'),d=devicePixelRatio||1,w=c.clientWidth*d,h=320*d;c.width=w;c.height=h;x.clearRect(0,0,w,h);if(!rows||!rows.length){x.fillStyle='#52616b';x.font=14*d+'px system-ui';x.fillText('Ожидание данных…',24*d,32*d);return}const pad={l:78*d,r:24*d,t:28*d,b:42*d},vals=keys.flatMap(k=>rows.map(r=>Number(r[k]))).filter(Number.isFinite),rawLo=Math.min(...vals),rawHi=Math.max(...vals),rawSpan=rawHi-rawLo,extra=rawSpan?rawSpan*.08:Math.max(Math.abs(rawHi)*.001,unit==='%'?.01:1),lo=rawLo-extra,hi=rawHi+extra,span=hi-lo||1,px=i=>pad.l+(w-pad.l-pad.r)*i/Math.max(1,rows.length-1),py=v=>h-pad.b-(h-pad.t-pad.b)*(v-lo)/span,fmt=v=>unit==='%'?v.toFixed(3)+'%':(Math.abs(v)>=100?v.toFixed(2):v.toFixed(6));x.font=12*d+'px system-ui';x.strokeStyle='#d8dee6';x.fillStyle='#52616b';x.lineWidth=d;for(let i=0;i<=5;i++){const v=lo+span*i/5,y=py(v);x.beginPath();x.moveTo(pad.l,y);x.lineTo(w-pad.r,y);x.stroke();x.fillText(fmt(v),4*d,y+4*d)};x.beginPath();x.moveTo(pad.l,pad.t);x.lineTo(pad.l,h-pad.b);x.lineTo(w-pad.r,h-pad.b);x.stroke();keys.forEach((k,n)=>{x.strokeStyle=colors[n]||'#333';x.lineWidth=2*d;x.beginPath();rows.forEach((r,i)=>{const v=Number(r[k]),q=[px(i),py(v)];Number.isFinite(v)&&(i?x.lineTo(...q):x.moveTo(...q))});x.stroke();x.fillStyle=x.strokeStyle;x.fillText(labels[n],pad.l+n*110*d,pad.t-8*d)});x.fillStyle='#52616b';x.fillText(new Date(rows[0].t*1000).toLocaleTimeString(),pad.l,h-10*d);if(rows.length>1)x.fillText(new Date(rows[rows.length-1].t*1000).toLocaleTimeString(),w-pad.r-70*d,h-10*d)}
+async function refresh(){try{const r=await fetch('live_status.json?t='+Date.now(),{cache:'no-store'}),d=await r.json();document.getElementById('title').textContent=d.symbol?d.symbol+' — Bybit / MEXC':'Ожидание сверки funding';document.getElementById('status').textContent=d.message||'';document.getElementById('simulation').textContent=d.simulation||'';lineChart('basket_net',d.basket_history,['projected_net'],['Projected net'],'USDT');}catch(e){document.getElementById('status').textContent='Ожидание данных…'}}setInterval(refresh,1000);refresh();</script></html>"""
 
     def __init__(self, directory: Path, port: int, max_points: int, open_browser: bool = True):
         self.directory = directory.resolve()
@@ -872,12 +891,12 @@ async function refresh(){try{const r=await fetch('live_status.json?t='+Date.now(
             self.current_simulation = simulation
         path = self.directory / "live_status.json"
         display_message = message + (f"\n{self.candidate_status}" if self.candidate_status else "")
-        # Overwrite the small status file in place. On Windows the browser may
-        # briefly hold it open, which makes replacing it fail with WinError 5.
         try:
             with path.open("w", encoding="utf-8") as stream:
                 json.dump({"symbol": symbol, "message": display_message, "graph": "", "stats_graph": "",
                            "simulation": self.current_simulation,
+                           "basket": getattr(self, 'basket_status', {}),
+                           "basket_history": getattr(self, 'basket_history', []),
                            "history": [{"t": row[0], "bybit": row[1], "mexc": row[2], "spread": row[3]}
                                        for row in self.history]}, stream, ensure_ascii=False)
         except PermissionError as exc:
@@ -906,8 +925,27 @@ async function refresh(){try{const r=await fetch('live_status.json?t='+Date.now(
         self.candidate_status = ""
         self.write_status("", "Нет кандидатов с достаточным спредом и глубиной стакана; ожидается следующая сверка.")
 
-    def update_candidate_status(self, summaries: list[str]) -> None:
-        self.candidate_status = ("Кандидаты на мониторинге: " + " | ".join(summaries)) if summaries else ""
+    def update_candidate_status(self, summaries: list[str],
+                                candidate_rows: list[dict[str, Any]] | None = None) -> None:
+        self.candidate_status = ("КАНДИДАТЫ ПОСЛЕ ФИЛЬТРА СПРЕДА/ЛИКВИДНОСТИ:\n" +
+                                 ("\n".join(summaries) if summaries else "Нет пар выше порога спреда."))
+        if candidate_rows is not None:
+            report_path = self.directory / "basket_candidates.csv"
+            fields = ["scan_time_utc", "base", "bybit_symbol", "mexc_symbol",
+                      "bybit_price", "mexc_price", "signed_spread_pct", "abs_spread_pct",
+                      "long_exchange", "short_exchange", "target_notional_usd",
+                      "long_depth_usd", "short_depth_usd", "status", "reason"]
+            scan_time = datetime.now(timezone.utc).isoformat()
+            try:
+                with report_path.open("w", encoding="utf-8-sig", newline="") as stream:
+                    writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore")
+                    writer.writeheader()
+                    for row in candidate_rows:
+                        writer.writerow({"scan_time_utc": scan_time, **row})
+                logging.info("Полный список кандидатов записан: %s (%s строк)",
+                             report_path, len(candidate_rows))
+            except OSError as exc:
+                logging.warning("Не удалось записать CSV списка кандидатов: %s", exc)
         self.write_status(self.symbol or "", self.current_message)
 
     def add_point(self, timestamp: float, bybit_price: Decimal, mexc_price: Decimal) -> None:
@@ -922,13 +960,24 @@ async function refresh(){try{const r=await fetch('live_status.json?t='+Date.now(
     def update_simulation(self, simulator: PaperSimulator) -> None:
         self.write_status(self.symbol or "", self.current_message, simulator.summary())
 
+    def update_basket(self, simulator: Any) -> None:
+        engine = simulator.engine
+        state = engine.state
+        self.basket_history = state.get('history', [])[-simulator.history_limit:]
+        self.basket_status = json.loads(json.dumps({key: state.get(key) for key in (
+            'phase', 'verified_legs', 'projection', 'projection_valid', 'last_reconcile_time',
+            'balances', 'balance_updated_at', 'halt_reason')}, default=str))
+        self.symbol = ', '.join(pair['base'] for pair in engine.basket['pairs']) if engine.basket else 'Basket'
+        message = ('6/6 verified required; projected net is not guaranteed realized profit. '
+                   + ('NEW ENTRIES BLOCKED' if not engine.can_enter else 'Waiting for exactly 3 eligible pairs'))
+        self.write_status(self.symbol, message, simulator.summary())
+
     def close(self) -> None:
         self.server.shutdown()
         self.server.server_close()
 
 
 def live_prices(a: Rate, b: Rate) -> tuple[Decimal, Decimal]:
-    """Fetch latest selected-pair prices from both exchanges in parallel."""
     def get_bybit() -> Decimal:
         data = get_json(f"{BYBIT}/v5/market/tickers", {"category": "linear", "symbol": a.exchange_symbol}, LIVE_TIMEOUT)
         if data.get("retCode") != 0:
@@ -957,7 +1006,6 @@ def live_prices(a: Rate, b: Rate) -> tuple[Decimal, Decimal]:
 
 
 def live_prices_many(pairs: list[tuple[Rate, Rate]]) -> dict[str, tuple[Decimal, Decimal]]:
-    """Fetch one all-market ticker snapshot per exchange for several monitored pairs."""
     def get_bybit_tickers() -> dict[str, Decimal]:
         payload = get_json(f"{BYBIT}/v5/market/tickers", {"category": "linear"}, LIVE_TIMEOUT)
         if payload.get("retCode") != 0:
@@ -991,7 +1039,6 @@ def compare_once(min_gap_pp: Decimal, chart_gap_pp: Decimal, chart_file: Path,
                  render_static_chart: bool = True) -> list[tuple[Decimal, Decimal, Rate, Rate]]:
     bybit = bybit_rates()
     mexc = mexc_rates()
-    # Compare every unambiguous active base asset that has a ticker on both exchanges.
     common = sorted(set(bybit) & set(mexc))
     all_rows = []
     for base in common:
@@ -1078,17 +1125,18 @@ class LiveTradingController:
             )
 
     def configure_rows(self, rows: list[tuple[Decimal, Decimal, Rate, Rate]]) -> None:
-        # Prepare live accounts and refresh metrics, but do not configure every
-        # active symbol; leverage is set only for the selected top candidates.
         self.executor.prepare_account()
         self.refresh_balances()
 
     def configure_candidates(self, pairs: list[tuple[Rate, Rate]]) -> None:
-        """Set leverage for all candidates that may be selected for a single entry."""
         rows = [(Decimal(0), Decimal(0), a, b) for a, b in pairs]
         self.executor.configure_symbols(rows)
-        logging.info("Плечо x%s настроено для %d мониторимых кандидатов",
-                     self.executor.leverage, len(pairs))
+        self.simulator.leverage = Decimal(self.executor.leverage)
+        self.simulator.notional = self.simulator.margin * self.simulator.leverage
+        logging.info(
+            "Плечо x%s настроено; номинал пересчитан до $%s на сторону",
+            self.executor.leverage, self.simulator.notional,
+        )
 
     def is_mexc_region_blocked(self, b: Rate) -> bool:
         return not self.is_paper("MEXC") and b.exchange_symbol in self.mexc_region_blocked_symbols
@@ -1112,7 +1160,6 @@ class LiveTradingController:
 
     def reported_live_net_pnl(self, positions: dict[str, list[dict[str, Any]]],
                               trade: dict[str, Any]) -> Decimal | None:
-        """Return current net PnL from the one live exchange's position API."""
         live_exchanges = [name for name in ("Bybit", "MEXC") if not self.is_paper(name)]
         if len(live_exchanges) != 1:
             return None
@@ -1123,8 +1170,6 @@ class LiveTradingController:
                     if int(p.get("_direction", 0)) == expected_direction and dec(p.get("holdVol")) > 0]
             if not rows or any(p.get("unRealizedPnl") in (None, "") for p in rows):
                 return None
-            # MEXC reports gross unrealized PnL separately from accumulated
-            # trading fees and funding; all inputs below come from its position API.
             return sum((dec(p.get("unRealizedPnl")) - dec(p.get("totalFee")) +
                         dec(p.get("holdFee")) for p in rows), Decimal(0))
 
@@ -1133,8 +1178,6 @@ class LiveTradingController:
                 if int(p.get("positionIdx", -1)) == expected_idx and dec(p.get("size")) > 0]
         if not rows or any(p.get("unrealisedPnl") in (None, "") for p in rows):
             return None
-        # curRealisedPnl is Bybit's position-level realized PnL for the
-        # currently held position, including its reported realized components.
         return sum((dec(p.get("unrealisedPnl")) + dec(p.get("curRealisedPnl"))
                     for p in rows), Decimal(0))
 
@@ -1179,8 +1222,6 @@ class LiveTradingController:
             raise LiveTradingError(f"Не подтверждено закрытие live-пары; новые заявки запрещены: {exc}") from exc
         bybit_exit, _, bybit_fee = self._close_fill("Bybit", results.get("Bybit"), a, bybit_mark)
         mexc_exit, _, mexc_fee = self._close_fill("MEXC", results.get("MEXC"), b, mexc_mark)
-        # If a leg disappeared outside this process, its actual exit fill is unavailable;
-        # use the configured taker estimate for that missing execution.
         if bybit_fee <= 0:
             bybit_fee = trade["quantities"]["Bybit"] * bybit_exit * sim.fee_rate["Bybit"]
         if mexc_fee <= 0:
@@ -1195,7 +1236,6 @@ class LiveTradingController:
         self.refresh_balances()
 
     def check_position_integrity(self, a: Rate, b: Rate, timestamp: float) -> None:
-        """Check both exchange legs even when public price polling failed."""
         sim = self.simulator
         trade = sim.open_trade
         if not trade:
@@ -1257,7 +1297,6 @@ class LiveTradingController:
                 raise LiveTradingError(f"Не удалось проверить обе live-ноги по API: {exc}") from exc
 
             expected_bybit_idx = 1 if trade["long_exchange"] == "Bybit" else 2
-            # MEXC positionType is normalized by the executor: 1 = long, 2 = short.
             expected_mexc_dir = 1 if trade["long_exchange"] == "MEXC" else 2
 
             unexpected_b = [] if self.is_paper("Bybit") else [
@@ -1286,10 +1325,6 @@ class LiveTradingController:
                 for p in positions["MEXC"]
             )
             reversed_direction = spread != 0 and (spread > 0) != (trade["entry_spread_pct"] > 0)
-            # Minimum-hold buffer: for the first N seconds after entry, only
-            # the PNL target (and leg-loss abort) may close the pair. This
-            # prevents instantly closing a freshly opened position when the
-            # spread momentarily converges right after entry.
             hold_ready = (timestamp - trade["opened_at"]) >= sim.min_hold_sec
 
             reported_pnl = (self.reported_live_net_pnl(positions, trade)
@@ -1421,40 +1456,478 @@ class LiveTradingController:
         sim.save_state()
 
 
+class BasketMonitor:
+    """Dashboard-facing view; the engine's atomic ledger is the source of truth."""
+    def __init__(self, engine: Any, history_limit: int = 360):
+        self.engine = engine
+        self.margin = basket_decimal(engine.executor.margin)
+        self.leverage = basket_decimal(engine.executor.leverage)
+        self.notional = basket_decimal(engine.executor.notional)
+        self.live_balances = None
+        self.live_balance_updated_at = None
+        self.history_limit = history_limit
+
+    def save_state(self) -> None:
+        self.engine.save_state()
+
+    def summary(self) -> str:
+        state = self.engine.state
+        basket = self.engine.basket
+        pairs = ', '.join(pair['base'] for pair in basket['pairs']) if basket else 'нет'
+        modes = ' | '.join(f'{name}={"PAPER" if self.engine.paper_flags[name] else "LIVE"}'
+                           for name in ('Bybit', 'MEXC'))
+        p = state.get('projection') or {}
+        def amount(key: str) -> str:
+            return f"${basket_decimal(p[key]):+.6f}" if key in p else 'нет данных'
+        status = 'свежая оценка' if state.get('projection_valid') else 'НЕДОСТУПНА/устарела — выход запрещён'
+        margin = notional = Decimal(0)
+        if basket:
+            for pair in basket['pairs']:
+                for name in ('Bybit', 'MEXC'):
+                    fill = pair.get('fills', {}).get(name)
+                    if fill:
+                        actual = basket_decimal(fill['base_qty']) * basket_decimal(fill['avg_price'])
+                        notional += actual
+                        margin += actual / basket_decimal(basket['leverage'])
+        reconcile_time = state.get('last_reconcile_time')
+        reconciled = datetime.fromtimestamp(float(reconcile_time), timezone.utc).isoformat() if reconcile_time else 'ещё нет'
+        lines = [f'Режим: {modes}', f'Basket: {pairs} | phase={state["phase"]}',
+                 f'Legs verified: {state.get("verified_legs", 0)}/6',
+                 f'Проекция: {status}', f'Gross (mid mark): {amount("gross")}',
+                 f'Entry fees: {amount("entry_fees")}',
+                 f'Projected exit taker fees: {amount("projected_exit_fees")}',
+                 f'Projected slippage (depth VWAP + buffer): {amount("projected_slippage")}',
+                 f'Projected net: {amount("projected_net")} | target=$0.10',
+                 f'Distance to target: {amount("distance_to_target")}',
+                 f'Total actual margin: ${margin:.6f} | total entry notional (6 legs): ${notional:.6f}',
+                 f'Запланировано: маржа ${self.margin} × 6; номинал ${self.notional} × 6',
+                 f'Last reconcile time: {reconciled}',
+                 f'Balance snapshot time: {state.get("balance_updated_at") or "нет"}']
+        for name in ('Bybit', 'MEXC'):
+            if self.engine.paper_flags[name]:
+                lines.append(f'{name} PAPER wallet: ${basket_decimal(state["paper_wallet"][name]):.6f}')
+            else:
+                metrics = state.get('balances', {}).get(name)
+                lines.append(f'{name} LIVE balances: {json.dumps(metrics, default=str, ensure_ascii=False) if metrics else "нет свежего снимка"}')
+        if state.get('halt_reason'):
+            lines.append(f'FAIL-CLOSED: {state["halt_reason"]}')
+        lines.append('Вход: ровно 3 пары, каждая ticker/executable/fill price spread строго >0.5%.')
+        lines.append('Выход: только ОБЩИЙ projected net >= $0.10 (либо аварийная защита).')
+        lines.append('Projected ≠ гарантированная реализованная прибыль. Funding не считается доходом; fees могут быть оценкой.')
+        return '\n'.join(lines)
+
+
+class BasketTradingController(LiveTradingController):
+    """Reuse regional/configuration guards, replace ALL single-pair trading paths."""
+    def __init__(self, engine: Any, simulator: BasketMonitor,
+                 book_provider: Any = None, api_allowed: Any = None,
+                 entry_spread_threshold: Decimal = BASKET_ENTRY_SPREAD):
+        super().__init__(engine.executor, simulator)
+        self.engine = engine
+        self.book_provider = book_provider or basket_orderbooks
+        self.api_allowed = api_allowed or mexc_contract_api_allowed
+        self.entry_spread_threshold = max(BASKET_ENTRY_SPREAD, basket_decimal(entry_spread_threshold))
+        # [PATCH 7] short-lived readiness buffer
+        self._pair_ready: dict[str, dict[str, Any]] = {}
+        self.pair_ready_ttl = 12.0
+
+    def configure_candidates(self, pairs: list[tuple[Rate, Rate]]) -> None:
+        self.simulator.margin = basket_decimal(self.executor.margin)
+        super().configure_candidates(pairs)
+        self.simulator.notional = basket_decimal(self.executor.notional)
+        self.engine.requested_sizing = (self.executor.margin, self.executor.leverage, self.executor.notional)
+
+    def refresh_balances(self) -> None:
+        try:
+            self.engine.refresh_balances()
+        except LiveTradingError:
+            if self.engine.halted:
+                raise
+            logging.warning('Balance snapshot unavailable; prior snapshot is explicitly timestamped')
+        except Exception as exc:
+            logging.warning('Balance snapshot unavailable: %s', exc)
+
+    def reconcile_startup(self) -> bool:
+        had_verified_open_state = self.engine.state['phase'] == 'OPEN'
+        try:
+            self.engine.reconcile(startup=True)
+        except LiveTradingError as exc:
+            reason = str(exc)
+            if had_verified_open_state and self.engine.basket and ('missing legs' in reason or 'quantity mismatch' in reason):
+                saved = self.engine.basket
+                self.executor.margin = basket_decimal(saved['margin_per_leg'])
+                self.executor.notional = basket_decimal(saved['notional_per_leg'])
+                self.executor.leverage = (basket_decimal(saved['leverage']) if all(self.engine.paper_flags.values())
+                                          else int(basket_decimal(saved['leverage'])))
+                self.engine.emergency_flatten_known(reason)
+            raise
+        self.refresh_balances()
+        return self.engine.basket is not None
+
+    def check_basket_integrity(self, emergency: bool = True) -> None:
+        try:
+            self.engine.reconcile()
+        except LiveTradingError as exc:
+            reason = str(exc)
+            if emergency and self.engine.basket and ('missing legs' in reason or 'quantity mismatch' in reason):
+                self.engine.emergency_flatten_known(reason)
+            raise
+
+    def process_basket(self, pairs: list[tuple[Rate, Rate]],
+                       current_prices: dict[str, tuple[Decimal, Decimal]],
+                       allow_entry: bool) -> bool:
+        """One tick, one aggregate decision; injectable public-data providers."""
+        self.region_restriction_detected = False
+        if self.engine.basket:
+            self.check_basket_integrity()
+            active = self.engine.active_pairs()
+            try:
+                books = self.book_provider(active)
+            except Exception as exc:
+                self.engine.state['projection_valid'] = False
+                self.engine.save_state()
+                logging.warning('Basket exit estimate unavailable; no target exit: %s', exc)
+                return False
+            try:
+                return self.engine.close_if_target(books)
+            except LiveTradingError:
+                if self.engine.halted:
+                    raise
+                logging.warning('Full exit depth unavailable/stale; no projected-net exit')
+                return False
+
+        if not allow_entry or not self.engine.can_enter:
+            return False
+
+        # [PATCH 8] readiness buffer: refresh survivors, drop expired, then enter
+        now = time.monotonic()
+        for a, b in pairs:
+            prices = current_prices.get(a.base)
+            if not prices or abs(basket_spread(*prices)) <= self.entry_spread_threshold:
+                continue
+            current_a = dataclasses.replace(a, price=prices[0])
+            current_b = dataclasses.replace(b, price=prices[1])
+            if not self.candidate_tradeable(current_a, current_b):
+                continue
+            if time.monotonic() < self._entry_retry_after.get(current_b.exchange_symbol, 0.0):
+                continue
+            if not self.is_paper('MEXC'):
+                try:
+                    permitted = self.api_allowed(current_b.exchange_symbol, timeout=LIVE_TIMEOUT)
+                except Exception as exc:
+                    logging.warning('Basket entry postponed: apiAllowed preflight unavailable: %s', exc)
+                    continue
+                if not permitted:
+                    self._block_mexc_region_symbol(current_b.exchange_symbol, 'apiAllowed=false')
+                    continue
+            try:
+                books_one = self.book_provider([(current_a, current_b)])
+                self.engine.preflight_books([(current_a, current_b)], books_one)
+            except Exception as exc:
+                logging.info('Basket candidate %s not ready: %s', current_a.base, exc)
+                continue
+            self._pair_ready[current_a.base] = {
+                'a': current_a, 'b': current_b, 'books': books_one,
+                'expires_at': now + self.pair_ready_ttl,
+            }
+
+        for base in [k for k, v in self._pair_ready.items() if v['expires_at'] <= now]:
+            self._pair_ready.pop(base, None)
+
+        ready = sorted(self._pair_ready.items(),
+                       key=lambda kv: kv[1]['expires_at'], reverse=True)
+        if len(ready) < BASKET_SIZE:
+            if ready:
+                logging.info('Basket readiness: %d/%d pairs ready (ttl=%.0fs)',
+                             len(ready), BASKET_SIZE, self.pair_ready_ttl)
+            return False
+        chosen = ready[:BASKET_SIZE]
+        chosen_pairs = [(v['a'], v['b']) for _, v in chosen]
+        try:
+            fresh_books = self.book_provider(chosen_pairs)
+        except Exception as exc:
+            logging.warning('Basket entry postponed: fresh book fetch failed: %s', exc)
+            return False
+        for a, b in chosen_pairs:
+            if not self.candidate_tradeable(a, b):
+                logging.warning('Basket chosen pair %s no longer tradeable', a.base)
+                return False
+        try:
+            opened = self.engine.open_basket(chosen_pairs, fresh_books)
+            if opened:
+                self._pair_ready.clear()
+            else:
+                for _, b in chosen_pairs:
+                    self._entry_retry_after[b.exchange_symbol] = time.monotonic() + 60
+            self.refresh_balances()
+            return opened
+        except MexcRegionRestrictedError as exc:
+            self.region_restriction_detected = True
+            self._block_mexc_region_symbol(exc.symbol, 'order API code 8950')
+            return False
+        except LiveTradingError:
+            if self.engine.halted or self.engine.basket:
+                raise
+            logging.warning('Basket aggregate balance/size preflight rejected entry')
+            return False
+
+
+def basket_orderbooks(pairs: list[tuple[Rate, Rate]]) -> dict[str, Any]:
+    def fetch_pair(a: Rate, b: Rate) -> tuple[str, Any]:
+        def bybit_book() -> dict[str, Any]:
+            observed_at = time.time()
+            payload = get_json(f'{BYBIT}/v5/market/orderbook',
+                               {'category': 'linear', 'symbol': a.exchange_symbol, 'limit': 50}, LIVE_TIMEOUT)
+            if payload.get('retCode') != 0:
+                raise RuntimeError('Bybit basket orderbook response rejected')
+            raw = payload['result']
+            return {'bids': raw.get('b', []), 'asks': raw.get('a', []), 'observed_at': observed_at}
+        def mexc_book() -> dict[str, Any]:
+            observed_at = time.time()
+            payload = mexc_get_json(f'{MEXC}/api/v1/contract/depth/{b.exchange_symbol}',
+                                    {'limit': 50}, timeout=LIVE_TIMEOUT, max_attempts=1)
+            if not payload.get('success'):
+                raise RuntimeError('MEXC basket orderbook response rejected')
+            raw = payload['data']
+            if b.contract_size <= 0:
+                raise RuntimeError('Missing MEXC contractSize; depth cannot be normalized')
+            def base_levels(rows: list[Any]) -> list[Any]:
+                result = []
+                for row in rows:
+                    if len(row) < 3:
+                        raise RuntimeError('MEXC depth must include price/count/volume')
+                    result.append([row[0], basket_decimal(row[2]) * b.contract_size])
+                return result
+            return {'bids': base_levels(raw.get('bids', [])), 'asks': base_levels(raw.get('asks', [])),
+                    'observed_at': observed_at}
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix='basket-book-leg') as pool:
+            bf, mf = pool.submit(bybit_book), pool.submit(mexc_book)
+            return a.base, {'Bybit': bf.result(), 'MEXC': mf.result()}
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix='basket-books') as pool:
+        return dict(pool.map(lambda pair: fetch_pair(*pair), pairs))
+
+
+def run_basket_monitor(args: Any, paper_flags: dict[str, bool], mode_profile: str) -> None:
+    state_file = args.state_file or Path(f'{mode_profile}_state.json')
+    known_profiles = ('paper', 'live', 'hybrid_bybit_paper_mexc_live', 'hybrid_bybit_live_mexc_paper')
+    for profile in known_profiles:
+        other = Path(f'{profile}_state.json')
+        if other.resolve() == state_file.resolve() or not other.exists():
+            continue
+        try:
+            saved = json.loads(other.read_text(encoding='utf-8'))
+        except Exception as exc:
+            raise LiveTradingError(f'Unreadable other-profile ledger {other}; startup blocked') from exc
+        if saved.get('open_trade') or saved.get('basket') or saved.get('phase') == 'HALTED':
+            raise LiveTradingError(f'Other-profile unresolved exposure {other}; mode switching blocked')
+    executor = LiveExecution(int(args.leverage), args.margin_per_leg,
+                             bybit_paper=paper_flags['Bybit'], mexc_paper=paper_flags['MEXC'])
+    if all(paper_flags.values()):
+        executor.leverage = args.leverage
+        executor.notional = args.margin_per_leg * args.leverage
+    engine = BasketExecution(executor, state_file,
+                             {'Bybit': args.bybit_taker_fee, 'MEXC': args.mexc_taker_fee},
+                             {name: args.initial_balance for name in ('Bybit', 'MEXC')},
+                             args.exit_slippage_bps)
+    simulator = BasketMonitor(engine, args.live_points)
+    engine.history_limit = args.live_points
+    dashboard = None
+    scan_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='basket-scan')
+    scan_future = None
+    try:
+        controller = BasketTradingController(engine, simulator, entry_spread_threshold=
+                                             max(args.open_gap_pct, args.min_live_gap_pct, BASKET_ENTRY_SPREAD))
+        dashboard = LiveDashboard(args.live_dir, args.live_port, args.live_points, not args.no_browser)
+        dashboard.update_basket(simulator)
+        controller.reconcile_startup()
+        if engine.basket:
+            simulator.leverage = basket_decimal(engine.basket['leverage'])
+            simulator.notional = basket_decimal(engine.basket['notional_per_leg'])
+            simulator.margin = basket_decimal(engine.basket['margin_per_leg'])
+        monitored = engine.active_pairs()
+        entries_allowed = False
+        next_scan = 0.0
+        next_balance = time.monotonic() + 30
+        next_monitor_log = 0.0
+        next_entry_poll = 0.0  # [PATCH 9]
+        def scan_task() -> tuple[list[Any], int, list[dict[str, Any]]]:
+            rows = compare_once(args.min_gap_pp, args.chart_gap_pp, args.chart_file, False)
+            candidates = [(abs(basket_spread(a.price, b.price)), a, b)
+                          for _, _, a, b in rows if min(a.price, b.price) > 0]
+            report: list[dict[str, Any]] = []
+            selected, checked = select_liquid_candidates(
+                candidates, simulator.notional,
+                max(BASKET_ENTRY_SPREAD, args.min_live_gap_pct, args.open_gap_pct),
+                controller, BASKET_SIZE, report)
+            return selected, checked, report
+        while True:
+            tick_started = time.monotonic()
+            now = time.monotonic()
+            if now >= next_balance:
+                controller.refresh_balances()
+                next_balance = time.monotonic() + 30
+            if engine.can_enter and scan_future is None and now >= next_scan:
+                entries_allowed = False
+                scan_future = scan_executor.submit(scan_task)
+                next_scan = now + args.interval
+            if scan_future is not None and scan_future.done():
+                try:
+                    selected, checked, scan_report = scan_future.result()
+                    monitored = [(item[1], item[2]) for item in selected] if len(selected) == 3 else []
+                    if monitored:
+                        controller.configure_candidates(monitored)
+                        monitored = [(a, b) for a, b in monitored if controller.candidate_tradeable(a, b)]
+                    entries_allowed = len(monitored) == 3 and engine.can_enter
+                    monitored_bases = {a.base for a, _ in monitored}
+                    selected_bases = {item[1].base for item in selected}
+                    for row in scan_report:
+                        if row['status'] == 'SELECTED':
+                            if row['base'] in monitored_bases and len(monitored) == 3:
+                                row['status'] = 'MONITORED'
+                                row['reason'] = 'входит в текущую наблюдаемую корзину 3/3'
+                            elif row['base'] in selected_bases and len(selected) < 3:
+                                row['status'] = 'WAITING_FOR_3'
+                                row['reason'] = 'пара проходит фильтры, но пока найдено меньше трёх подходящих пар'
+                            elif row['base'] in monitored_bases:
+                                row['status'] = 'WAITING_FOR_3'
+                                row['reason'] = 'пара проходит фильтры, но для входа нужно набрать 3/3'
+                            else:
+                                row['status'] = 'REJECTED_AFTER_CONFIG'
+                                row['reason'] = 'не прошла повторную проверку после настройки плеча'
+                    summaries = []
+                    for row in scan_report:
+                        depth = (f"depth LONG ${row['long_depth_usd']:.2f} / "
+                                 f"SHORT ${row['short_depth_usd']:.2f}"
+                                 if row['long_depth_usd'] != '' else 'depth не проверена')
+                        summaries.append(
+                            f"{row['base']} [{row['bybit_symbol']} / {row['mexc_symbol']}] | "
+                            f"spread {row['signed_spread_pct']:+.5f}% | "
+                            f"Bybit {row['bybit_price']:.8g} / MEXC {row['mexc_price']:.8g} | "
+                            f"LONG {row['long_exchange']} / SHORT {row['short_exchange']} | "
+                            f"{depth} | {row['status']}: {row['reason']}")
+                        logging.info(
+                            "Basket candidate %s | symbols=%s/%s | spread=%+.6f%% | "
+                            "price_bybit=%s price_mexc=%s | LONG=%s SHORT=%s | "
+                            "depth_long=%s depth_short=%s target_notional=%s | status=%s | %s",
+                            row['base'], row['bybit_symbol'], row['mexc_symbol'],
+                            row['signed_spread_pct'], row['bybit_price'], row['mexc_price'],
+                            row['long_exchange'], row['short_exchange'],
+                            row['long_depth_usd'], row['short_depth_usd'],
+                            row['target_notional_usd'], row['status'], row['reason'])
+                    dashboard.update_candidate_status(summaries, scan_report)
+                    logging.info('Basket scan: %s/3 monitored, %s books checked, %s above spread threshold',
+                                 len(monitored), checked, len(scan_report))
+                except LiveTradingError:
+                    raise
+                except Exception as exc:
+                    logging.warning('Basket scan unavailable; entries paused: %s', exc)
+                    entries_allowed = False
+                finally:
+                    scan_future = None
+                    next_scan = max(next_scan, time.monotonic() + args.interval)
+            was_open = engine.basket is not None
+            if was_open:
+                controller.process_basket(engine.active_pairs(), {}, False)
+                if engine.basket is None:
+                    monitored = []
+                    entries_allowed = False
+                    simulator.margin = basket_decimal(executor.margin)
+                    simulator.leverage = basket_decimal(executor.leverage)
+                    simulator.notional = basket_decimal(executor.notional)
+                    next_scan = time.monotonic() + args.candidate_delay_sec
+                    controller.refresh_balances()
+            elif monitored and entries_allowed:
+                # [PATCH 10] entry poll on its own cadence, not tied to --interval
+                if time.monotonic() >= next_entry_poll:
+                    try:
+                        prices = live_prices_many(monitored)
+                    except Exception as exc:
+                        logging.warning('Basket ticker unavailable; no new entry: %s', exc)
+                        prices = {}
+                    if time.monotonic() >= next_monitor_log:
+                        threshold = controller.entry_spread_threshold
+                        for a, b in monitored:
+                            current = prices.get(a.base)
+                            if not current:
+                                logging.info('Basket monitor %s | текущая цена недоступна; вход отложен', a.base)
+                                continue
+                            current_spread = basket_spread(current[0], current[1])
+                            check = 'PASS' if abs(current_spread) > threshold else 'WAIT'
+                            logging.info(
+                                'Basket monitor %s | Bybit=%s MEXC=%s | current_spread=%+.6f%% '
+                                '| требование >%s%% | entry_check=%s',
+                                a.base, current[0], current[1], current_spread, threshold, check)
+                        next_monitor_log = time.monotonic() + max(10, args.interval)
+                    controller.process_basket(monitored, prices, True)
+                    if engine.basket:
+                        entries_allowed = False
+                        monitored = engine.active_pairs()
+                    elif controller.region_restriction_detected:
+                        entries_allowed = False
+                        next_scan = time.monotonic() + args.candidate_delay_sec
+                    next_entry_poll = time.monotonic() + max(1, args.entry_poll_sec)
+                else:
+                    if engine.basket:
+                        controller.process_basket(engine.active_pairs(), {}, False)
+            dashboard.update_basket(simulator)
+            remaining = 1 - (time.monotonic() - tick_started)
+            if remaining > 0:
+                time.sleep(remaining)
+    except KeyboardInterrupt:
+        logging.warning('Basket monitor stopped; any active basket is persisted for restart reconciliation')
+    except BaseException as exc:
+        if not engine.halted:
+            try:
+                engine.halt(f'Controller stopped fail-closed: {exc}')
+            except LiveTradingError:
+                pass
+        if dashboard:
+            dashboard.update_basket(simulator)
+        raise
+    finally:
+        scan_executor.shutdown(wait=False, cancel_futures=True)
+        try:
+            engine.save_state()
+        finally:
+            if dashboard:
+                dashboard.close()
+            engine.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Сравнение предстоящих funding Bybit и MEXC")
     parser.add_argument("--once", action="store_true", help="выполнить одну сверку funding и завершить (без live-цикла)")
-    parser.add_argument(
-        "--min-gap-pp", type=Decimal, default=Decimal("0"),
-        help="минимальное расхождение для вывода в процентных пунктах (по умолчанию любое)",
-    )
-    parser.add_argument(
-        "--chart-gap-pp", type=Decimal, default=Decimal("0.01"),
-        help="минимальное расхождение для создания графика; по умолчанию 0.01 п.п.",
-    )
-    parser.add_argument("--chart-file", type=Path, default=Path("funding_comparison.png"), help="устаревший параметр; PNG не сохраняются")
-    parser.add_argument("--interval", type=int, default=INTERVAL_SECONDS, help="интервал повторной сверки funding в секундах (по умолчанию 60)")
-    parser.add_argument("--min-live-gap-pct", type=Decimal, default=Decimal("0"),
-                        help="минимальный процентный спред цены для выбора пары (по умолчанию любое ненулевое отличие)")
-    parser.add_argument("--live-dir", type=Path, default=Path("live_chart"), help="папка браузерного live-графика")
-    parser.add_argument("--live-port", type=int, default=8765, help="локальный порт страницы live-графика")
-    parser.add_argument("--live-points", type=int, default=360, help="число точек в скользящей истории графика")
-    parser.add_argument("--no-browser", action="store_true", help="не открывать страницу графика автоматически")
-    parser.add_argument("--initial-balance", type=Decimal, default=Decimal("10"), help="стартовый баланс каждой биржи, USD; по умолчанию $10")
-    parser.add_argument("--margin-per-leg", type=Decimal, default=Decimal("1"), help="маржа одной стороны; по умолчанию $1, при x10 номинал около $10")
-    parser.add_argument("--leverage", type=Decimal, default=Decimal("10"), help="плечо; в live-режиме целое значение на обоих аккаунтах")
-    parser.add_argument("--open-gap-pct", type=Decimal, default=PRICE_OPEN_THRESHOLD_PCT, help="открывать при спреде цены выше, в процентах")
-    parser.add_argument("--close-gap-pct", type=Decimal, default=PRICE_CLOSE_THRESHOLD_PCT, help="закрывать при спреде цены ниже, в процентах")
-    parser.add_argument("--candidate-delay-sec", type=int, default=60,
-                        help="пауза после полного закрытия обеих ног перед новым поиском кандидата")
-    parser.add_argument("--min-hold-sec", type=int, default=MIN_HOLD_SECONDS,
-                        help="минимальное время удержания до закрытия по спреду, сек; "
-                             "PNL-цель и аварийное закрытие игнорируют этот буфер")
-    parser.add_argument("--bybit-taker-fee", type=Decimal, default=Decimal("0.00055"), help="комиссия Bybit в долях; 0.00055 = 0.055%%")
-    parser.add_argument("--mexc-taker-fee", type=Decimal, default=Decimal("0.0008"), help="комиссия MEXC API в долях; 0.0008 = 0.08%%")
-    parser.add_argument("--trades-csv", type=Path, default=None, help="путь к CSV закрытых сделок (по умолчанию отдельный для paper/live/hybrid)")
-    parser.add_argument("--state-file", type=Path, default=None, help="путь к JSON состояния (по умолчанию отдельный для paper/live/hybrid)")
+    parser.add_argument("--min-gap-pp", type=Decimal, default=Decimal("0"))
+    parser.add_argument("--chart-gap-pp", type=Decimal, default=Decimal("0.01"))
+    parser.add_argument("--chart-file", type=Path, default=Path("funding_comparison.png"))
+    parser.add_argument("--interval", type=int, default=INTERVAL_SECONDS)
+    parser.add_argument("--min-live-gap-pct", type=Decimal, default=Decimal("0"))
+    parser.add_argument("--live-dir", type=Path, default=Path("live_chart"))
+    parser.add_argument("--live-port", type=int, default=8765)
+    parser.add_argument("--live-points", type=int, default=360)
+    parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--initial-balance", type=Decimal, default=Decimal("10"))
+    parser.add_argument("--margin-per-leg", type=Decimal, default=Decimal("0.6"))
+    parser.add_argument("--leverage", type=Decimal, default=Decimal("10"))
+    parser.add_argument("--open-gap-pct", type=Decimal, default=PRICE_OPEN_THRESHOLD_PCT)
+    parser.add_argument("--close-gap-pct", type=Decimal, default=PRICE_CLOSE_THRESHOLD_PCT)
+    parser.add_argument("--candidate-delay-sec", type=int, default=60)
+    parser.add_argument("--min-hold-sec", type=int, default=MIN_HOLD_SECONDS)
+    parser.add_argument("--bybit-taker-fee", type=Decimal, default=Decimal("0.00055"))
+    parser.add_argument("--mexc-taker-fee", type=Decimal, default=Decimal("0.0008"))
+    parser.add_argument("--trades-csv", type=Path, default=None)
+    parser.add_argument("--state-file", type=Path, default=None)
+    parser.add_argument("--exit-slippage-bps", type=Decimal, default=Decimal('2'))
+    # [PATCH 11] entry poll cadence
+    parser.add_argument("--entry-poll-sec", type=int, default=5,
+                        help="как часто пытаться открыть корзину из готовых пар (сек); "
+                             "полный скан рынка остаётся на --interval")
     args = parser.parse_args()
+    for name in ('min_gap_pp', 'chart_gap_pp', 'min_live_gap_pct', 'initial_balance',
+                 'margin_per_leg', 'leverage', 'open_gap_pct', 'close_gap_pct',
+                 'bybit_taker_fee', 'mexc_taker_fee', 'exit_slippage_bps'):
+        if not getattr(args, name).is_finite():
+            parser.error(f'--{name.replace("_", "-")} must be finite')
     if args.interval < 1:
         parser.error("--interval должен быть положительным")
     if args.min_gap_pp < 0 or args.chart_gap_pp < 0 or args.min_live_gap_pct < 0:
@@ -1465,10 +1938,14 @@ def main() -> None:
         parser.error("--candidate-delay-sec не может быть отрицательным")
     if args.min_hold_sec < 0:
         parser.error("--min-hold-sec не может быть отрицательным")
+    if args.entry_poll_sec < 1:
+        parser.error("--entry-poll-sec должен быть положительным")
     if args.initial_balance <= 0 or args.margin_per_leg <= 0 or args.leverage <= 0:
         parser.error("баланс, маржа и плечо должны быть положительными")
-    if args.open_gap_pct <= args.close_gap_pct or args.close_gap_pct < 0:
-        parser.error("порог входа должен быть выше порога выхода, а порог выхода неотрицательным")
+    if args.open_gap_pct < BASKET_ENTRY_SPREAD or args.close_gap_pct < 0:
+        parser.error("basket entry threshold cannot be below 0.5%; close-gap is deprecated")
+    if not args.exit_slippage_bps.is_finite() or args.exit_slippage_bps < 0:
+        parser.error("--exit-slippage-bps must be finite and nonnegative")
     if not (0 <= args.bybit_taker_fee < 1 and 0 <= args.mexc_taker_fee < 1):
         parser.error("ставки комиссий должны быть в диапазоне [0, 1)")
     paper_flags = {"Bybit": DEMO or bybit_paper, "MEXC": DEMO or mexc_paper}
@@ -1492,256 +1969,9 @@ def main() -> None:
         logging.warning("DEMO=%s | %s — реальные ордера отключены; работает paper trading",
                         DEMO, mode_text)
 
-    trades_csv = args.trades_csv or Path(f"{mode_profile}_trades.csv")
-    state_file = args.state_file or Path(f"{mode_profile}_state.json")
-    known_state_files = [Path(f"{profile}_state.json") for profile in (
-        "paper", "live", "hybrid_bybit_paper_mexc_live", "hybrid_bybit_live_mexc_paper")]
-    for other_state in known_state_files:
-        if other_state.resolve() == state_file.resolve() or not other_state.exists():
-            continue
-        try:
-            other_data = json.loads(other_state.read_text(encoding="utf-8"))
-        except Exception as exc:
-            raise LiveTradingError(f"Невозможно прочитать состояние {other_state}; запуск остановлен, чтобы не игнорировать возможную открытую пару") from exc
-        if other_data.get("open_trade"):
-            raise LiveTradingError(f"В профиле {other_state} сохранена открытая пара. Сначала восстановите и закройте её в прежнем режиме; переключать DEMO/paper-флаги при открытой сделке нельзя")
-    simulator = PaperSimulator(
-        args.margin_per_leg, args.leverage, args.initial_balance,
-        args.bybit_taker_fee, args.mexc_taker_fee, trades_csv,
-        args.open_gap_pct, args.close_gap_pct, args.live_points, state_file,
-        min_hold_sec=args.min_hold_sec,
-    )
-    simulator.live_mode = has_live_exchange
-    simulator.exchange_paper = dict(paper_flags)
-    if simulator.open_trade and not simulator.pair:
-        raise LiveTradingError("В состоянии есть открытая позиция, но отсутствуют биржевые символы; безопасно восстановить её невозможно")
-    restored_trade = bool(simulator.open_trade)
-    live_controller = None
-    if has_live_exchange:
-        from live_execution import LiveExecution
-        executor = LiveExecution(int(args.leverage), args.margin_per_leg,
-                                 bybit_paper=paper_flags["Bybit"], mexc_paper=paper_flags["MEXC"])
-        live_controller = LiveTradingController(executor, simulator)
-        try:
-            live_controller.reconcile_startup()
-        except Exception:
-            logging.exception("Не удалось безопасно сверить live-позиции; запуск прекращён")
-            raise
-    startup_trade_closed = restored_trade and simulator.open_trade is None
-
-    dashboard = LiveDashboard(args.live_dir, args.live_port, args.live_points, not args.no_browser)
-    dashboard.update_simulation(simulator)
-    next_balance_refresh = time.monotonic() + 30.0
-    selected: tuple[Rate, Rate] | None = None
-    monitored_candidates: list[tuple[Rate, Rate]] = []
-    if simulator.open_trade and simulator.pair:
-        base, bybit_symbol, mexc_symbol = simulator.pair
-        bybit_price = (simulator.last_prices[0] if simulator.last_prices else
-                       simulator.open_trade["entry_prices"]["Bybit"])
-        mexc_price = (simulator.last_prices[1] if simulator.last_prices else
-                      simulator.open_trade["entry_prices"]["MEXC"])
-        selected = (
-            Rate(bybit_symbol, base, Decimal(0), None, Decimal(0), bybit_price),
-            Rate(mexc_symbol, base, Decimal(0), None, Decimal(0), mexc_price),
-        )
-        monitored_candidates = [selected]
-        dashboard.set_pair(*selected)
-        logging.info("Восстановлена выбранная пара %s; новые поиски при открытой позиции отключены", base)
-
-    scan_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="funding-scan")
-    scan_future = None
-    entries_allowed = False
-    next_scan = (time.monotonic() + args.candidate_delay_sec
-                 if simulator.open_trade or startup_trade_closed else 0.0)
-
-    def scan_task() -> tuple[list[tuple[Decimal, Rate, Rate]], int]:
-        rows = compare_once(args.min_gap_pp, args.chart_gap_pp, args.chart_file, False)
-        if live_controller:
-            live_controller.configure_rows(rows)
-        price_candidates = [
-            (abs((a.price / b.price - Decimal(1)) * Decimal(100)), a, b)
-            for _, _, a, b in rows if a.price > 0 and b.price > 0
-        ]
-        selected_candidates, checked_books = select_liquid_candidates(
-            price_candidates, simulator.notional, args.min_live_gap_pct,
-            live_controller, MONITORED_CANDIDATES,
-        )
-        if live_controller and selected_candidates:
-            live_controller.configure_candidates([(item[1], item[2]) for item in selected_candidates])
-        return selected_candidates, checked_books
-
-    def after_close(was_open: bool) -> None:
-        nonlocal entries_allowed, next_scan
-        if was_open and not simulator.open_trade:
-            entries_allowed = False
-            next_scan = time.monotonic() + args.candidate_delay_sec
-            logging.info("Обе ноги закрыты; новый поиск кандидата через %d сек.", args.candidate_delay_sec)
-
-    try:
-        while True:
-            tick_started = time.monotonic()
-            now = time.monotonic()
-            if live_controller and now >= next_balance_refresh:
-                live_controller.refresh_balances()
-                dashboard.update_simulation(simulator)
-                next_balance_refresh = time.monotonic() + 30.0
-            if not simulator.open_trade and scan_future is None and now >= next_scan:
-                entries_allowed = False
-                scan_future = scan_executor.submit(scan_task)
-                next_scan = now + args.interval
-                logging.info("Запущен фоновый поиск кандидата; входы приостановлены до его завершения")
-
-            if scan_future is not None and scan_future.done():
-                try:
-                    selected_candidates, checked_books = scan_future.result()
-                    if selected_candidates:
-                        monitored_candidates = [(item[1], item[2]) for item in selected_candidates]
-                        _, a, b = selected_candidates[0]
-                        dashboard.set_pair(a, b)
-                        simulator.select_pair(a, b)
-                        selected = (a, b)
-                        summaries = [f"{i + 1}) {item[1].base} {((item[1].price / item[2].price - Decimal(1)) * Decimal(100)):+.4f}%"
-                                     for i, item in enumerate(selected_candidates)]
-                        dashboard.update_candidate_status(summaries)
-                        entries_allowed = True
-                        logging.info("Найдено %d кандидата по спреду с глубиной стакана $%.2f "
-                                     "(проверено стаканов: %d): %s",
-                                     len(monitored_candidates), simulator.notional, checked_books,
-                                     " | ".join(summaries))
-                    else:
-                        selected = None
-                        monitored_candidates = []
-                        simulator.select_pair(None, None)
-                        dashboard.clear_pair()
-                        entries_allowed = False
-                        logging.info("Нет кандидатов выше минимального spread %.6f%% с достаточной глубиной стакана",
-                                     args.min_live_gap_pct)
-                    dashboard.update_simulation(simulator)
-                except LiveTradingError:
-                    raise
-                except (requests.RequestException, RuntimeError, ValueError, KeyError, OSError) as exc:
-                    logging.exception("Ошибка фоновой минутной сверки: %s", exc)
-                finally:
-                    scan_future = None
-                    next_scan = max(next_scan, time.monotonic() + args.interval)
-
-            try:
-                if simulator.open_trade and selected:
-                    # Once a pair is open, monitor only its legs for position management.
-                    was_open = True
-                    bybit_price, mexc_price = live_prices(*selected)
-                    if bybit_price > 0 and mexc_price > 0:
-                        tick_time = time.time()
-                        if live_controller:
-                            live_controller.process_prices(*selected, bybit_price, mexc_price,
-                                                           tick_time, False)
-                        else:
-                            simulator.process_prices(bybit_price, mexc_price, tick_time, allow_entry=False)
-                        after_close(was_open)
-                        dashboard.add_point(tick_time, bybit_price, mexc_price)
-                        dashboard.update_simulation(simulator)
-                    else:
-                        logging.warning("Получена нулевая цена; точка пропущена")
-                        if live_controller:
-                            live_controller.check_position_integrity(*selected, time.time())
-                        after_close(was_open)
-                elif monitored_candidates:
-                    # One all-market ticker snapshot per exchange feeds all three candidates.
-                    was_open = False
-                    current_prices = live_prices_many(monitored_candidates)
-                    candidate_summaries = []
-                    for index, (a, b) in enumerate(monitored_candidates, 1):
-                        prices = current_prices.get(a.base)
-                        if not prices:
-                            candidate_summaries.append(f"{index}) {a.base}: нет котировки")
-                            continue
-                        bybit_price, mexc_price = prices
-                        spread = (bybit_price / mexc_price - Decimal(1)) * Decimal(100)
-                        candidate_summaries.append(f"{index}) {a.base} {spread:+.4f}%")
-                    dashboard.update_candidate_status(candidate_summaries)
-
-                    opened_pair = None
-                    if entries_allowed:
-                        entry_candidates = []
-                        for a, b in monitored_candidates:
-                            prices = current_prices.get(a.base)
-                            if not prices:
-                                continue
-                            bybit_price, mexc_price = prices
-                            spread = abs((bybit_price / mexc_price - Decimal(1)) * Decimal(100))
-                            entry_candidates.append((spread, a, b, bybit_price, mexc_price))
-                        entry_candidates.sort(key=lambda item: item[0], reverse=True)
-                        for spread, a, b, bybit_price, mexc_price in entry_candidates:
-                            if spread <= simulator.open_gap_pct:
-                                break
-                            pair_key = (a.base, a.exchange_symbol, b.exchange_symbol)
-                            if simulator.pair != pair_key:
-                                simulator.select_pair(a, b)
-                            tick_time = time.time()
-                            if live_controller:
-                                live_controller.process_prices(a, b, bybit_price, mexc_price,
-                                                               tick_time, True)
-                            else:
-                                simulator.process_prices(bybit_price, mexc_price, tick_time, allow_entry=True)
-                            if live_controller and live_controller.region_restriction_detected:
-                                break
-                            if simulator.open_trade:
-                                opened_pair = (a, b)
-                                selected = opened_pair
-                                monitored_candidates = [opened_pair]
-                                dashboard.set_pair(a, b)
-                                dashboard.update_candidate_status([])
-                                dashboard.add_point(tick_time, bybit_price, mexc_price)
-                                logging.info("Сигнал найден у кандидата %s; остальные кандидаты сняты с мониторинга до закрытия позиции",
-                                             a.base)
-                                break
-
-                    if opened_pair:
-                        dashboard.update_simulation(simulator)
-                    elif monitored_candidates:
-                        # Preserve the leader as the ledger/dashboard reference when flat.
-                        a, b = monitored_candidates[0]
-                        prices = current_prices.get(a.base)
-                        if prices:
-                            if simulator.pair != (a.base, a.exchange_symbol, b.exchange_symbol):
-                                simulator.select_pair(a, b)
-                            selected = (a, b)
-                            bybit_price, mexc_price = prices
-                            tick_time = time.time()
-                            if live_controller:
-                                live_controller.process_prices(a, b, bybit_price, mexc_price,
-                                                               tick_time, False)
-                            else:
-                                simulator.process_prices(bybit_price, mexc_price, tick_time, allow_entry=False)
-                            dashboard.set_pair(a, b)
-                            dashboard.add_point(tick_time, bybit_price, mexc_price)
-                            dashboard.update_simulation(simulator)
-                        else:
-                            logging.warning("Не получены котировки ни одного мониторимого кандидата")
-                elif selected:
-                    # During a scan with no eligible candidates, retain the existing leader for display only.
-                    bybit_price, mexc_price = live_prices(*selected)
-                    dashboard.add_point(time.time(), bybit_price, mexc_price)
-            except LiveTradingError:
-                logging.exception("Критическая live-ошибка; процесс остановлен, новые ордера запрещены")
-                raise
-            except (requests.RequestException, RuntimeError, ValueError, KeyError, OSError) as exc:
-                logging.warning("Ошибка опроса цен кандидатов: %s", exc)
-                if live_controller and simulator.open_trade and selected:
-                    live_controller.check_position_integrity(*selected, time.time())
-                after_close(bool(simulator.open_trade))
-                if live_controller:
-                    dashboard.update_simulation(simulator)
-
-            remaining = 1.0 - (time.monotonic() - tick_started)
-            if remaining > 0:
-                time.sleep(remaining)
-    except KeyboardInterrupt:
-        logging.info("Остановка по Ctrl+C")
-    finally:
-        simulator.save_state()
-        scan_executor.shutdown(wait=False, cancel_futures=True)
-        dashboard.close()
+    logging.warning('--close-gap-pct/--min-hold-sec are legacy parameters: basket exits use aggregate projected net >= Decimal("0.10") or safety abort only')
+    logging.warning('Basket archive (including interrupted/rolled-back attempts and components) is persisted in --state-file; legacy --trades-csv is not used')
+    run_basket_monitor(args, paper_flags, mode_profile)
 
 
 if __name__ == "__main__":

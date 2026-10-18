@@ -9,15 +9,44 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal, ROUND_DOWN
+from pathlib import Path
 from threading import Lock
 from typing import Any
 from urllib.parse import urlencode
 
 import requests
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
+
+
+def _lock_state_file(stream: Any) -> None:
+    """Acquire a non-blocking exclusive lock using only standard-library APIs."""
+    if os.name == "nt":
+        stream.seek(0, os.SEEK_END)
+        if stream.tell() == 0:
+            stream.write(b"\0")
+            stream.flush()
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_state_file(stream: Any) -> None:
+    """Release the exclusive state-file lock."""
+    if os.name == "nt":
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 BYBIT_URL = "https://api.bybit.com"
 MEXC_URL = "https://api.mexc.com"
@@ -32,6 +61,10 @@ class LiveTradingError(RuntimeError):
 
 class EntryRejectedAfterRollback(LiveTradingError):
     """A candidate entry was safely rolled back and may be skipped without stopping."""
+
+
+class OrderOutcomeUnknown(LiveTradingError):
+    """An order may still execute; observing flat positions is not sufficient."""
 
 
 class MexcRegionRestrictedError(LiveTradingError):
@@ -109,8 +142,6 @@ class BybitREST:
         response.raise_for_status()
         payload_json = response.json()
         ret_code = payload_json.get("retCode")
-        # Bybit returns 110043 when the requested leverage is already set.
-        # Treat it as success only for this specific configuration endpoint.
         if (str(ret_code) == "110043" and method == "POST"
                 and path == "/v5/position/set-leverage"):
             logging.info("Bybit %s: плечо уже установлено (110043); продолжаю", path)
@@ -124,8 +155,20 @@ class BybitREST:
         if symbol:
             params.pop("settleCoin", None)
             params["symbol"] = symbol
-        result = self.request("GET", "/v5/position/list", params)
-        return [p for p in result.get("list", []) if _d(p.get("size")) > 0]
+        rows: list[dict[str, Any]] = []
+        cursors: set[str] = set()
+        while True:
+            result = self.request("GET", "/v5/position/list", params)
+            if not isinstance(result.get("list"), list):
+                raise LiveTradingError("Bybit position inventory is incomplete")
+            rows.extend(p for p in result["list"] if basket_decimal(p.get("size")) > 0)
+            cursor = result.get("nextPageCursor") or ""
+            if not cursor:
+                return rows
+            if cursor in cursors:
+                raise LiveTradingError("Bybit position pagination repeated a cursor")
+            cursors.add(cursor)
+            params["cursor"] = cursor
 
     def open_orders(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
@@ -169,16 +212,22 @@ class BybitREST:
             "qty": format(qty, "f"), "positionIdx": position_idx,
             "reduceOnly": reduce_only, "orderLinkId": "FM" + uuid.uuid4().hex[:32],
         }
-        result = self.request("POST", "/v5/order/create", body)
+        try:
+            result = self.request("POST", "/v5/order/create", body)
+        except (requests.RequestException, ValueError, TypeError) as exc:
+            raise OrderOutcomeUnknown(f"Bybit create outcome unknown for {symbol}") from exc
         order_id = result.get("orderId")
         if not order_id:
-            raise LiveTradingError(f"Bybit did not return orderId for {symbol}")
+            raise OrderOutcomeUnknown(f"Bybit did not return orderId for {symbol}")
         deadline = time.monotonic() + ORDER_WAIT_SECONDS
         last: dict[str, Any] = {}
         while time.monotonic() < deadline:
-            last_result = self.request("GET", "/v5/order/realtime", {
-                "category": "linear", "symbol": symbol, "orderId": order_id,
-            })
+            try:
+                last_result = self.request("GET", "/v5/order/realtime", {
+                    "category": "linear", "symbol": symbol, "orderId": order_id,
+                })
+            except Exception as exc:
+                raise OrderOutcomeUnknown(f"Bybit order {order_id} confirmation unavailable") from exc
             rows = last_result.get("list", [])
             if rows:
                 last = rows[0]
@@ -186,6 +235,8 @@ class BybitREST:
                 if status in ("Filled", "Cancelled", "Rejected", "PartiallyFilledCanceled"):
                     break
             time.sleep(0.2)
+        if last.get("orderStatus") not in ("Filled", "Cancelled", "Rejected", "PartiallyFilledCanceled"):
+            raise OrderOutcomeUnknown(f"Bybit order {order_id} is not confirmed terminal")
         filled = _d(last.get("cumExecQty"))
         avg = _d(last.get("avgPrice"))
         if filled <= 0 or avg <= 0:
@@ -245,17 +296,19 @@ class MEXCREST:
             rows = [rows]
         result: list[dict[str, Any]] = []
         for p in rows:
-            if _d(p.get("state")) != 1:
+            volume = basket_decimal(p.get("holdVol"))
+            state = basket_decimal(p.get("state"))
+            if volume < 0:
+                raise LiveTradingError("MEXC position inventory contains a negative quantity")
+            if volume == 0:
                 continue
-            if _d(p.get("holdVol")) <= 0:
-                continue
+            if state != 1:
+                raise LiveTradingError("MEXC positive position has an unknown/non-open state")
             if symbol and p.get("symbol") != symbol:
                 continue
-            # Get Open Positions documents positionType as the direction
-            # (1 = long, 2 = short). The response does not define a `side` field.
             normalized = dict(p)
             direction = p.get("positionType")
-            if direction is None:  # compatibility with older/nonstandard responses
+            if direction is None:
                 direction = p.get("side", 0)
             normalized["_direction"] = int(direction or 0)
             result.append(normalized)
@@ -315,16 +368,23 @@ class MEXCREST:
             if position_id is None and "code=8950" in str(exc):
                 raise MexcRegionRestrictedError(symbol, str(exc)) from exc
             raise
+        except (requests.RequestException, ValueError, TypeError) as exc:
+            raise OrderOutcomeUnknown(f"MEXC create outcome unknown for {symbol}") from exc
         order_id = result.get("orderId") if isinstance(result, dict) else None
         if not order_id:
-            raise LiveTradingError(f"MEXC did not return orderId for {symbol}")
+            raise OrderOutcomeUnknown(f"MEXC did not return orderId for {symbol}")
         deadline = time.monotonic() + ORDER_WAIT_SECONDS
         last: dict[str, Any] = {}
         while time.monotonic() < deadline:
-            last = self.request("GET", f"/api/v1/private/order/get/{order_id}") or {}
+            try:
+                last = self.request("GET", f"/api/v1/private/order/get/{order_id}") or {}
+            except Exception as exc:
+                raise OrderOutcomeUnknown(f"MEXC order {order_id} confirmation unavailable") from exc
             if int(last.get("state", 0) or 0) in (3, 4, 5):
                 break
             time.sleep(0.2)
+        if int(last.get("state", 0) or 0) not in (3, 4, 5):
+            raise OrderOutcomeUnknown(f"MEXC order {order_id} is not confirmed terminal")
         filled = _d(last.get("dealVol"))
         avg = _d(last.get("dealAvgPrice"))
         if filled <= 0 or avg <= 0:
@@ -349,6 +409,7 @@ class LiveExecution:
         self.notional = margin_per_leg * Decimal(leverage)
         self.configured_bybit: set[str] = set()
         self.configured_mexc: set[str] = set()
+        self.untradeable_pairs: set[tuple[str, str]] = set()
         self.prepared = False
 
     def configure_account(self) -> None:
@@ -365,7 +426,6 @@ class LiveExecution:
             try:
                 self.bybit.request("POST", "/v5/position/switch-mode", {"category": "linear", "coin": "USDT", "mode": 3})
             except LiveTradingError as exc:
-                # Bybit's 110025 explicitly means the requested mode is already active.
                 if "110025" not in str(exc):
                     raise
         if self.mexc:
@@ -375,7 +435,6 @@ class LiveExecution:
         logging.warning("LIVE account configuration applied to %s", ", ".join(active))
 
     def prepare_account(self) -> None:
-        """Prepare the selected live accounts without configuring every symbol."""
         if not self.prepared:
             self.configure_account()
         else:
@@ -399,13 +458,56 @@ class LiveExecution:
         for row in rows:
             a, b = row[2], row[3]
             pairs[(a.exchange_symbol, b.exchange_symbol)] = (a, b)
-        for i, ((bybit_symbol, mexc_symbol), (a, b)) in enumerate(pairs.items(), 1):
+
+        retried_at_x10: set[tuple[str, str]] = set()
+        items = list(pairs.items())
+        i = 0
+        while i < len(items):
+            (bybit_symbol, mexc_symbol), (a, b) = items[i]
+            pair_key = (bybit_symbol, mexc_symbol)
+            if pair_key in self.untradeable_pairs:
+                i += 1
+                continue
+
             if self.bybit and bybit_symbol not in self.configured_bybit:
-                self.bybit.request("POST", "/v5/position/set-leverage", {
-                    "category": "linear", "symbol": bybit_symbol,
-                    "buyLeverage": str(self.leverage), "sellLeverage": str(self.leverage),
-                })
-                self.configured_bybit.add(bybit_symbol)
+                try:
+                    self.bybit.request("POST", "/v5/position/set-leverage", {
+                        "category": "linear", "symbol": bybit_symbol,
+                        "buyLeverage": str(self.leverage), "sellLeverage": str(self.leverage),
+                    })
+                    self.configured_bybit.add(bybit_symbol)
+                except LiveTradingError as exc:
+                    if "110013" not in str(exc):
+                        raise
+                    if self.leverage != 10:
+                        logging.warning(
+                            "Bybit 110013 для %s при x%s; переключаю весь запуск на x10 "
+                            "и пересчитываю номинал", bybit_symbol, self.leverage,
+                        )
+                        self.leverage = 10
+                        self.notional = self.margin * Decimal("10")
+                        self.configured_bybit.clear()
+                        self.configured_mexc.clear()
+                        retried_at_x10.add(pair_key)
+                        i = 0
+                        continue
+
+                    if pair_key not in retried_at_x10:
+                        logging.warning(
+                            "Bybit 110013 для %s при x10; повторяю установку x10 один раз",
+                            bybit_symbol,
+                        )
+                        retried_at_x10.add(pair_key)
+                        continue
+
+                    self.untradeable_pairs.add(pair_key)
+                    logging.error(
+                        "Пара %s / %s пропущена: Bybit повторно вернул 110013 при x10",
+                        bybit_symbol, mexc_symbol,
+                    )
+                    i += 1
+                    continue
+
             if self.mexc and mexc_symbol not in self.configured_mexc:
                 for position_type in (1, 2):
                     self._mexc_config_request("/api/v1/private/position/change_leverage", {
@@ -413,11 +515,18 @@ class LiveExecution:
                         "openType": 2, "positionType": position_type,
                     })
                 self.configured_mexc.add(mexc_symbol)
-            if i % 10 == 0:
-                logging.info("Live-настройка плеча: %d/%d общих контрактных пар", i, len(pairs))
+
+            if (i + 1) % 10 == 0:
+                logging.info("Live-настройка плеча: %d/%d общих контрактных пар", i + 1, len(items))
+            i += 1
+
         active = [name for name, paper in (("Bybit", self.bybit_paper), ("MEXC", self.mexc_paper)) if not paper]
         if active:
-            logging.info("Плечо x%d задано для %d общих пар на live-биржах: %s", self.leverage, len(pairs), ", ".join(active))
+            ready_count = sum(1 for pair_key, _ in items if pair_key not in self.untradeable_pairs)
+            logging.info(
+                "Плечо x%d задано для %d/%d пар на live-биржах: %s",
+                self.leverage, ready_count, len(items), ", ".join(active),
+            )
 
     def positions(self, a: Any, b: Any) -> dict[str, list[dict[str, Any]]]:
         rows: dict[str, list[dict[str, Any]]] = {"Bybit": [], "MEXC": []}
@@ -445,7 +554,6 @@ class LiveExecution:
         return result
 
     def account_metrics(self) -> dict[str, dict[str, Decimal]]:
-        """Read the current account metrics from enabled live exchanges only."""
         result: dict[str, dict[str, Decimal]] = {}
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix="balance-check") as pool:
             futures = {}
@@ -479,7 +587,8 @@ class LiveExecution:
         return vol
 
     def pair_is_tradeable(self, a: Any, b: Any) -> bool:
-        """Preflight sizing only; never rounds a requested exposure upward."""
+        if (a.exchange_symbol, b.exchange_symbol) in self.untradeable_pairs:
+            return False
         lower, upper = self.notional * Decimal("0.90"), self.notional * Decimal("1.10")
         if self.bybit:
             try:
@@ -525,6 +634,10 @@ class LiveExecution:
                 "expected_qty": vol, "contract_size": rate.contract_size}
 
     def open_pair(self, a: Any, b: Any, long_exchange: str) -> dict[str, Any]:
+        if (a.exchange_symbol, b.exchange_symbol) in self.untradeable_pairs:
+            raise LiveTradingError(
+                f"Пара {a.exchange_symbol}/{b.exchange_symbol} исключена после ошибки настройки плеча"
+            )
         required = self.margin * Decimal("1.10")
         balances = self.balance_snapshot()
         if any(balances.get(name, Decimal(0)) < required for name, paper in
@@ -550,14 +663,19 @@ class LiveExecution:
                 (exc for exc in errors.values() if isinstance(exc, MexcRegionRestrictedError)),
                 None,
             )
+            unknown_error = next((exc for exc in errors.values() if isinstance(exc, OrderOutcomeUnknown)), None)
             try:
                 self.close_pair(a, b, long_exchange)
             except Exception as unwind_exc:
+                if unknown_error:
+                    raise OrderOutcomeUnknown(f"Entry and unwind remain ambiguous: {unwind_exc}") from unknown_error
                 raise LiveTradingError(f"Одна нога не открылась; аварийное закрытие второй также не подтвердилось. Немедленно проверьте позиции на биржах: {unwind_exc}") from next(iter(errors.values()))
+            if unknown_error:
+                raise OrderOutcomeUnknown(f"Pair entry outcome remains ambiguous after unwind: {unknown_error}") from unknown_error
             if region_error:
                 raise region_error
             raise LiveTradingError(f"Не удалось открыть обе ноги; исполненная нога аварийно закрыта. Ошибка: {next(iter(errors.values()))}")
-        lower_ratio = Decimal("0.90")  # допускаем округление шага контракта вниз
+        lower_ratio = Decimal("0.90")
         upper_ratio = Decimal("1.10")
         for name, fill in fills.items():
             actual = fill["base_qty"] * fill["avg_price"]
@@ -567,8 +685,6 @@ class LiveExecution:
                 except Exception as unwind_exc:
                     raise LiveTradingError(f"Размер неполного исполнения вне допуска; аварийное закрытие не подтверждено: {unwind_exc}")
                 raise LiveTradingError(f"Размер исполнения {name} (${actual:.4f}) вне допуска к цели ${self.notional}; обе ноги закрыты")
-        # MEXC может отставать с индексацией позиции на 1-2 секунды после fill.
-        # Даём несколько попыток, прежде чем считать, что позиции нет.
         current: dict[str, list[dict[str, Any]]] | None = None
         last_exc: Exception | None = None
         for attempt in range(6):
@@ -655,9 +771,8 @@ class LiveExecution:
         return self.bybit.order(symbol, side, _d(position["size"]), position_idx, True)
 
     def _close_mexc(self, symbol: str, position_type: int, rate: Any) -> list[dict[str, Any]]:
-        # Use the normalized documented MEXC positionType direction
-        # (1=long, 2=short), not order-side codes.
-        # Закрываем всё, что фактически открыто по этому символу.
+        if position_type not in (1, 2):
+            raise LiveTradingError("MEXC close requires an explicitly owned direction")
         positions = self.mexc.open_positions(symbol)
         results: list[dict[str, Any]] = []
         for position in positions:
@@ -665,10 +780,12 @@ class LiveExecution:
             if vol <= 0:
                 continue
             direction = int(position.get("_direction", 0) or 0)
+            if direction != position_type:
+                raise LiveTradingError(f"MEXC {symbol}: unknown/opposite direction; no blind liquidation")
             if direction == 1:
-                side = 4   # close long
+                side = 4
             elif direction == 2:
-                side = 2   # close short
+                side = 2
             else:
                 raise LiveTradingError(
                     f"MEXC {symbol}: невозможно определить сторону позиции "
@@ -684,7 +801,6 @@ class LiveExecution:
 
     def close_pair(self, a: Any, b: Any, long_exchange: str) -> dict[str, Any]:
         bybit_idx = 1 if long_exchange == "Bybit" else 2
-        # MEXC positionType: 1 = long, 2 = short.
         mexc_direction = 1 if long_exchange == "MEXC" else 2
         results: dict[str, Any] = {"Bybit": None, "MEXC": []}
         deadline = time.monotonic() + POSITION_WAIT_SECONDS
@@ -701,17 +817,13 @@ class LiveExecution:
             )
             if not b_open and not m_open:
                 return results
-            # Market orders are IOC-like. If a close did not fully flatten a leg,
-            # re-read the actual residual size and submit another reduce-only close.
-            # Never resend based only on a timeout: position state is re-queried first.
             if time.monotonic() >= retry_at:
                 jobs = {}
                 with ThreadPoolExecutor(max_workers=2, thread_name_prefix="live-close") as pool:
                     if b_open:
                         jobs[pool.submit(self._close_bybit, a.exchange_symbol, bybit_idx, a)] = "Bybit"
                     if m_open:
-                        # position_type здесь не важен: _close_mexc смотрит на side.
-                        jobs[pool.submit(self._close_mexc, b.exchange_symbol, 0, b)] = "MEXC"
+                        jobs[pool.submit(self._close_mexc, b.exchange_symbol, mexc_direction, b)] = "MEXC"
                     for future, exchange in jobs.items():
                         try:
                             value = future.result()
@@ -738,7 +850,6 @@ class LiveExecution:
         )
 
     def prepare_restored_position(self, simulator: Any) -> bool:
-        """Reconcile persisted bot state with exchange positions; close any orphan leg."""
         trade = simulator.open_trade
         if not trade or not simulator.pair:
             return False
@@ -749,7 +860,6 @@ class LiveExecution:
         b = SimpleNamespace(exchange_symbol=msym, base=base, price=last[1])
         long_exchange = trade["long_exchange"]
         bybit_idx = 1 if long_exchange == "Bybit" else 2
-        # MEXC positionType: 1 = long, 2 = short.
         mexc_direction = 1 if long_exchange == "MEXC" else 2
 
         if ((self.bybit and self.bybit.open_orders()) or
@@ -789,3 +899,739 @@ class LiveExecution:
         simulator.record_equity(time.time(), *last)
         simulator.save_state()
         return False
+
+
+# [PATCH 1] New sanity constants for instrument equivalence and depth.
+BASKET_SIZE = 3
+BASKET_ENTRY_SPREAD = Decimal('0.5')  # percent, STRICTLY greater
+BASKET_MAX_SPREAD = Decimal('5')      # hard sanity ceiling; >5% = mismatched instruments
+MAX_TICKER_RATIO_DEVIATION = Decimal('0.10')  # |a/b - 1| <= 10%
+DEPTH_SAFETY_MULTIPLIER = Decimal('3')        # visible depth must be >= 3x leg notional
+BASKET_NET_TARGET = Decimal('0.10')  # USDT, aggregate projected net
+EXCHANGES = ('Bybit', 'MEXC')
+
+
+def basket_decimal(value: Any) -> Decimal:
+    """Financial/state inputs must fail closed, never silently become zero."""
+    try:
+        result = Decimal(str(value))
+    except Exception as exc:
+        raise LiveTradingError(f'Invalid decimal: {value!r}') from exc
+    if not result.is_finite():
+        raise LiveTradingError('Non-finite financial input')
+    return result
+
+
+def basket_spread(bybit: Any, mexc: Any) -> Decimal:
+    a, b = basket_decimal(bybit), basket_decimal(mexc)
+    if min(a, b) <= 0:
+        raise LiveTradingError('Basket prices must be positive')
+    return (a / b - 1) * 100
+
+
+def depth_vwap(levels: list[Any], quantity: Any, buy: bool) -> Decimal:
+    """Consume base-unit depth; never extrapolate insufficient visible depth."""
+    remaining = basket_decimal(quantity)
+    if remaining <= 0 or not levels:
+        raise LiveTradingError('Missing depth/invalid quantity')
+    rows = []
+    for row in levels:
+        if not isinstance(row, (tuple, list)) or len(row) < 2:
+            raise LiveTradingError('Malformed depth level')
+        price, size = basket_decimal(row[0]), basket_decimal(row[1])
+        if price <= 0 or size < 0:
+            raise LiveTradingError('Invalid depth level')
+        if size:
+            rows.append((price, size))
+    rows.sort(key=lambda row: row[0], reverse=not buy)
+    cost = Decimal(0)
+    for price, available in rows:
+        take = min(remaining, available)
+        cost += take * price
+        remaining -= take
+        if remaining == 0:
+            return cost / basket_decimal(quantity)
+    raise LiveTradingError('Insufficient visible depth for the complete leg')
+
+
+def validate_basket_book(book: dict[str, Any], now: float, max_age: float = 5.0) -> None:
+    age = float(basket_decimal(now)) - float(basket_decimal(book.get('observed_at', 0)))
+    if age < -1 or age > max_age:
+        raise LiveTradingError('Stale orderbook snapshot')
+    bids, asks = book.get('bids', []), book.get('asks', [])
+    if not bids or not asks:
+        raise LiveTradingError('Both orderbook sides are required')
+    bid = max(basket_decimal(row[0]) for row in bids)
+    ask = min(basket_decimal(row[0]) for row in asks)
+    if min(bid, ask) <= 0 or bid >= ask:
+        raise LiveTradingError('Invalid/crossed orderbook')
+
+
+def project_basket(basket: dict[str, Any], books: dict[str, Any],
+                   fee_rates: dict[str, Any], extra_slippage_bps: Any = Decimal('2'),
+                   now: float | None = None) -> dict[str, Any]:
+    now = time.time() if now is None else now
+    buffer_rate = basket_decimal(extra_slippage_bps) / 10000
+    if not 0 <= buffer_rate < 1:
+        raise LiveTradingError('Slippage buffer must be in [0, 10000) bps')
+    gross = entry = fees = slippage = notional = margin = Decimal(0)
+    components, exits = [], {}
+    if len(basket.get('pairs', [])) != BASKET_SIZE:
+        raise LiveTradingError('Basket must contain exactly three pairs')
+    stamps = []
+    for pair in basket['pairs']:
+        key = pair['base']
+        exit_prices = {}
+        for name in EXCHANGES:
+            fill = pair['fills'][name]
+            quantity = basket_decimal(fill['base_qty'])
+            entered = basket_decimal(fill['avg_price'])
+            entry_fee = basket_decimal(fill['fee'])
+            fee_rate = basket_decimal(fee_rates[name])
+            if quantity <= 0 or entered <= 0 or entry_fee < 0 or not 0 <= fee_rate < 1:
+                raise LiveTradingError('Invalid basket fill/fee')
+            book = books[key][name]
+            validate_basket_book(book, now)
+            stamps.append(float(book['observed_at']))
+            is_long = pair['long_exchange'] == name
+            bid = max(basket_decimal(row[0]) for row in book['bids'])
+            ask = min(basket_decimal(row[0]) for row in book['asks'])
+            mark = (bid + ask) / 2
+            vwap = depth_vwap(book['bids'] if is_long else book['asks'], quantity, not is_long)
+            expected_exit = vwap * (1 - buffer_rate if is_long else 1 + buffer_rate)
+            sign = Decimal(1) if is_long else Decimal(-1)
+            leg_gross = sign * quantity * (mark - entered)
+            leg_slippage = sign * quantity * (mark - expected_exit)
+            leg_exit_fee = quantity * expected_exit * fee_rate
+            gross += leg_gross
+            entry += entry_fee
+            fees += leg_exit_fee
+            slippage += leg_slippage
+            notional += quantity * entered
+            margin += quantity * entered / basket_decimal(basket['leverage'])
+            exit_prices[name] = expected_exit
+            components.append({'base': key, 'exchange': name, 'gross': leg_gross,
+                               'entry_fee': entry_fee, 'exit_fee': leg_exit_fee,
+                               'slippage': leg_slippage, 'exit_vwap': vwap,
+                               'buffered_exit': expected_exit})
+        exits[key] = exit_prices
+    if max(stamps) - min(stamps) > 3.0:
+        raise LiveTradingError('Basket orderbook snapshots are not synchronized')
+    net = gross - entry - fees - slippage
+    return {'gross': gross, 'entry_fees': entry, 'projected_exit_fees': fees,
+            'projected_slippage': slippage, 'projected_net': net,
+            'distance_to_target': max(Decimal(0), BASKET_NET_TARGET - net),
+            'total_margin': margin, 'total_notional': notional,
+            'target': BASKET_NET_TARGET, 'components': components,
+            'exit_prices': exits, 'observed_at': now}
+
+
+class BasketExecution:
+    """Durable three-pair saga. Unknown exposure/accounting is sticky fail-closed."""
+    def __init__(self, executor: Any, state_file: Path, fee_rates: dict[str, Decimal],
+                 paper_balances: dict[str, Decimal] | None = None,
+                 extra_slippage_bps: Decimal = Decimal('2'), clock: Any = time.time):
+        self.executor = executor
+        self.state_file = Path(state_file)
+        self.requested_sizing = (executor.margin, executor.leverage, executor.notional)
+        self.fee_rates = {k: basket_decimal(fee_rates[k]) for k in EXCHANGES}
+        self.extra_slippage_bps = basket_decimal(extra_slippage_bps)
+        if any(not 0 <= v < 1 for v in self.fee_rates.values()) or not 0 <= self.extra_slippage_bps < 10000:
+            raise LiveTradingError('Invalid fees/slippage configuration')
+        self.clock = clock
+        self.paper_flags = {k: bool(getattr(executor, k.lower() + '_paper')) for k in EXCHANGES}
+        self._lock_file = None
+        self.reconciled = False
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
+        self._lock_file = self.state_file.with_name(self.state_file.name + '.lock').open('a+b')
+        try:
+            _lock_state_file(self._lock_file)
+        except OSError as exc:
+            self._lock_file.close()
+            raise LiveTradingError('Basket ledger is already owned by another process') from exc
+        self.state = {'version': 2, 'paper_flags': self.paper_flags, 'phase': 'FLAT',
+                      'halt_reason': None, 'basket': None, 'archive': [],
+                      'last_reconcile_time': None, 'verified_legs': 0, 'inventory': {},
+                      'projection': None, 'projection_valid': False, 'history': [],
+                      'balances': {}, 'balance_updated_at': None,
+                      'paper_wallet': paper_balances or {k: Decimal('10') for k in EXCHANGES}}
+        try:
+            if self.state_file.exists():
+                saved = json.loads(self.state_file.read_text(encoding='utf-8'))
+                if not isinstance(saved, dict):
+                    raise LiveTradingError('Invalid basket state object')
+                if saved.get('version') != 2:
+                    if saved.get('open_trade') or saved.get('basket'):
+                        raise LiveTradingError('Legacy active position: migration blocked; original state preserved')
+                    if saved.get('version') != 1:
+                        raise LiveTradingError('Unknown state version; original state preserved')
+                    self.state['legacy_state'] = saved
+                    self.state['paper_wallet'] = saved.get('wallet', self.state['paper_wallet'])
+                else:
+                    required = {'phase', 'basket', 'archive', 'paper_wallet', 'paper_flags'}
+                    if not required.issubset(saved) or saved['phase'] not in {
+                            'FLAT', 'OPENING', 'OPEN', 'CLOSING', 'ROLLING_BACK', 'HALTED'}:
+                        raise LiveTradingError('Incomplete/corrupt basket state; original preserved')
+                    if saved['paper_flags'] != self.paper_flags:
+                        raise LiveTradingError('Execution-mode change requires a different reconciled ledger')
+                    if saved['phase'] == 'FLAT' and saved['basket'] is not None:
+                        raise LiveTradingError('FLAT state contains exposure; original preserved')
+                    if saved['phase'] != 'FLAT' and not isinstance(saved['basket'], dict):
+                        if saved['phase'] != 'HALTED':
+                            raise LiveTradingError('Active state has no basket; original preserved')
+                    self.state.update(saved)
+                    if self.state['basket']:
+                        self._validate_saved_basket(self.state['basket'])
+                if not isinstance(self.state['archive'], list) or not isinstance(self.state['paper_wallet'], dict):
+                    raise LiveTradingError('Invalid ledger archive/wallet; original preserved')
+                for name in EXCHANGES:
+                    basket_decimal(self.state['paper_wallet'][name])
+                self.state['verified_legs'] = 0
+                self.state['projection_valid'] = False
+        except BaseException:
+            self.close()
+            raise
+
+    def _validate_saved_basket(self, basket: dict[str, Any]) -> None:
+        if len(basket.get('pairs', [])) != 3 or basket_decimal(basket['leverage']) <= 0:
+            raise LiveTradingError('Invalid saved basket')
+        bases, bybit, mexc = set(), set(), set()
+        for pair in basket['pairs']:
+            if pair['long_exchange'] not in EXCHANGES:
+                raise LiveTradingError('Invalid saved direction')
+            bases.add(pair['base'])
+            bybit.add(pair['rates']['Bybit']['exchange_symbol'])
+            mexc.add(pair['rates']['MEXC']['exchange_symbol'])
+            for name in EXCHANGES:
+                if basket_decimal(pair['planned_qty'][name]) <= 0:
+                    raise LiveTradingError('Invalid saved planned quantity')
+                if self.state['phase'] == 'OPEN':
+                    fill = pair['fills'][name]
+                    if min(basket_decimal(fill['qty']), basket_decimal(fill['base_qty']),
+                           basket_decimal(fill['avg_price'])) <= 0 or basket_decimal(fill['fee']) < 0:
+                        raise LiveTradingError('Invalid persisted fill')
+                    multiplier = (Decimal(1) if name == 'Bybit' else
+                                  basket_decimal(pair['rates'][name]['contract_size']))
+                    if multiplier <= 0 or basket_decimal(fill['base_qty']) != basket_decimal(fill['qty']) * multiplier:
+                        raise LiveTradingError('Inconsistent persisted contract/base quantity')
+        if min(len(bases), len(bybit), len(mexc)) != 3:
+            raise LiveTradingError('Duplicate saved basket instruments')
+
+    @property
+    def basket(self) -> dict[str, Any] | None:
+        return self.state['basket']
+
+    @property
+    def halted(self) -> bool:
+        return self.state['phase'] == 'HALTED'
+
+    @property
+    def can_enter(self) -> bool:
+        return self.reconciled and self.state['phase'] == 'FLAT' and self.basket is None
+
+    def save_state(self) -> None:
+        temp = self.state_file.with_name(self.state_file.name + '.tmp')
+        try:
+            with temp.open('w', encoding='utf-8') as stream:
+                json.dump(self.state, stream, ensure_ascii=False, default=str, allow_nan=False)
+                stream.write('\n')
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temp, self.state_file)
+            directory_flag = getattr(os, 'O_DIRECTORY', None)
+            if directory_flag is not None:
+                directory = os.open(self.state_file.parent, os.O_RDONLY | directory_flag)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+        except Exception as exc:
+            self.reconciled = False
+            self.state['phase'] = 'HALTED'
+            self.state['halt_reason'] = f'Persistence failure: {exc}'
+            raise LiveTradingError(self.state['halt_reason']) from exc
+
+    def halt(self, reason: str) -> None:
+        self.reconciled = False
+        self.state['phase'] = 'HALTED'
+        self.state['halt_reason'] = reason
+        self.state['projection_valid'] = False
+        self.save_state()
+        raise LiveTradingError(reason)
+
+    def inventory(self) -> dict[str, Any]:
+        if hasattr(self.executor, 'basket_inventory'):
+            result = self.executor.basket_inventory()
+        else:
+            result = {}
+            for name in EXCHANGES:
+                rest = getattr(self.executor, name.lower())
+                result[name] = {'positions': rest.open_positions() if rest else [],
+                                'orders': rest.open_orders() if rest else []}
+        if any(name not in result or not isinstance(result[name].get('positions'), list)
+               or not isinstance(result[name].get('orders'), list) for name in EXCHANGES):
+            raise LiveTradingError('Incomplete account inventory')
+        return result
+
+    @staticmethod
+    def position_key(name: str, row: dict[str, Any]) -> tuple[str, int]:
+        side = int(row.get('positionIdx', -1) if name == 'Bybit' else row.get('_direction', 0))
+        return str(row.get('symbol', '')), side
+
+    def expected(self, include_unfilled: bool = False) -> dict[str, dict[Any, Any]]:
+        result = {k: {} for k in EXCHANGES}
+        for pair in (self.basket or {}).get('pairs', []):
+            for name in EXCHANGES:
+                long = pair['long_exchange'] == name
+                direction = (1 if long else 2)
+                fill = pair.get('fills', {}).get(name)
+                if fill or include_unfilled:
+                    quantity = basket_decimal(fill['qty'] if fill else pair['planned_qty'][name])
+                    result[name][(pair['rates'][name]['exchange_symbol'], direction)] = quantity
+        return result
+
+    def reconcile(self, startup: bool = False) -> int:
+        try:
+            inventory = self.inventory()
+            self.state['inventory'] = inventory
+            self.state['last_reconcile_time'] = self.clock()
+            verified = 0
+            expected = self.expected()
+            problems = []
+            for name in EXCHANGES:
+                if self.paper_flags[name]:
+                    if self.basket and self.state['phase'] == 'OPEN':
+                        verified += 3
+                    continue
+                rows = inventory[name]
+                if rows['orders']:
+                    problems.append(f'{name}: outstanding/unknown orders')
+                seen = set()
+                for row in rows['positions']:
+                    key = self.position_key(name, row)
+                    qty = basket_decimal(row['size'] if name == 'Bybit' else row['holdVol'])
+                    if key in seen or key not in expected[name]:
+                        problems.append(f'{name}: unknown/duplicate position {key}')
+                    elif qty != expected[name][key]:
+                        problems.append(f'{name}: quantity mismatch {key} {qty} != {expected[name][key]}')
+                    else:
+                        verified += 1
+                    seen.add(key)
+                missing = set(expected[name]) - seen
+                if missing:
+                    problems.append(f'{name}: missing legs {sorted(missing)}')
+            self.state['verified_legs'] = verified
+            if self.state['phase'] not in ('FLAT', 'OPEN'):
+                problems.append(f'Interrupted/sticky state {self.state["phase"]}; operator reconciliation required')
+            if self.state['phase'] == 'OPEN' and verified != 6:
+                problems.append(f'Only {verified}/6 legs verified')
+            if problems:
+                if self.basket:
+                    self.basket.setdefault('safety_events', []).append({
+                        'time': self.clock(), 'problems': problems, 'inventory': inventory})
+                self.halt('; '.join(problems))
+            self.reconciled = True
+            if startup and self.basket:
+                self.executor.prepared = True
+                self.executor.leverage = (basket_decimal(self.basket['leverage']) if all(self.paper_flags.values())
+                                          else int(basket_decimal(self.basket['leverage'])))
+                self.executor.notional = basket_decimal(self.basket['notional_per_leg'])
+                self.executor.margin = basket_decimal(self.basket['margin_per_leg'])
+            self.save_state()
+            return verified
+        except LiveTradingError:
+            if not self.halted:
+                self.halt('Account reconciliation failed; exposure ledger retained')
+            raise
+        except Exception as exc:
+            self.halt(f'Account reconciliation unavailable: {exc}')
+        return 0
+
+    def refresh_balances(self) -> None:
+        self.state['balances'] = self.executor.account_metrics()
+        self.state['balance_updated_at'] = self.clock()
+        self.save_state()
+
+    @staticmethod
+    def rate_record(rate: Any) -> dict[str, Any]:
+        return {key: getattr(rate, key, Decimal(0)) for key in (
+            'exchange_symbol', 'base', 'price', 'qty_step', 'min_qty',
+            'contract_size', 'vol_step', 'min_vol')}
+
+    @staticmethod
+    def restore_rate(record: dict[str, Any]) -> Any:
+        from types import SimpleNamespace
+        return SimpleNamespace(**{k: v if k in ('base', 'exchange_symbol') else basket_decimal(v)
+                                  for k, v in record.items()})
+
+    def active_pairs(self) -> list[tuple[Any, Any]]:
+        return [(self.restore_rate(pair['rates']['Bybit']), self.restore_rate(pair['rates']['MEXC']))
+                for pair in (self.basket or {}).get('pairs', [])]
+
+    def _plan(self, pairs: list[tuple[Any, Any]]) -> list[dict[str, Any]]:
+        if len(pairs) != 3 or len({a.base for a, _ in pairs}) != 3:
+            raise LiveTradingError('Entry requires exactly three distinct pairs')
+        if len({a.exchange_symbol for a, _ in pairs}) != 3 or len({b.exchange_symbol for _, b in pairs}) != 3:
+            raise LiveTradingError('Duplicate exchange instruments')
+        result = []
+        for a, b in pairs:
+            spread = basket_spread(a.price, b.price)
+            if a.base != b.base or abs(spread) <= BASKET_ENTRY_SPREAD:
+                raise LiveTradingError('Every entry price spread must be strictly > 0.5%')
+            # [PATCH 2] sanity ceiling and ticker-ratio check
+            if abs(spread) > BASKET_MAX_SPREAD:
+                raise LiveTradingError(
+                    f"{a.base}: ticker spread {spread:+.4f}% exceeds sanity ceiling "
+                    f"{BASKET_MAX_SPREAD}% — mismatched instruments or corrupted ticker")
+            ratio = basket_decimal(a.price) / basket_decimal(b.price)
+            if abs(ratio - 1) > MAX_TICKER_RATIO_DEVIATION:
+                raise LiveTradingError(
+                    f"{a.base}: ticker price ratio {ratio:.6f} deviates >"
+                    f"{MAX_TICKER_RATIO_DEVIATION * 100}% — likely different instruments")
+            # [PATCH 2 end]
+            if not self.executor.pair_is_tradeable(a, b):
+                raise LiveTradingError('Pair fails size/leverage/region preflight')
+            qty = {}
+            for name, rate in zip(EXCHANGES, (a, b)):
+                if self.paper_flags[name]:
+                    base_qty = basket_decimal(self.executor.notional) / basket_decimal(rate.price)
+                    qty[name] = base_qty if name == 'Bybit' else base_qty / basket_decimal(rate.contract_size)
+                else:
+                    qty[name] = (self.executor._bybit_spec_qty(rate) if name == 'Bybit'
+                                 else self.executor._mexc_spec_vol(rate))
+            result.append({'base': a.base, 'long_exchange': 'Bybit' if spread < 0 else 'MEXC',
+                           'rates': {'Bybit': self.rate_record(a), 'MEXC': self.rate_record(b)},
+                           'planned_qty': qty, 'fills': {}, 'attempted': False})
+        return result
+
+    def preflight_books(self, pairs: list[tuple[Any, Any]], books: dict[str, Any]) -> None:
+        now = self.clock()
+        stamps = []
+        failures = []
+        for pair in self._plan(pairs):
+            prices = {}
+            try:
+                for name in EXCHANGES:
+                    book = books[pair['base']][name]
+                    validate_basket_book(book, now)
+                    stamps.append(float(book['observed_at']))
+                    buy = pair['long_exchange'] == name
+                    base_qty = basket_decimal(pair['planned_qty'][name])
+                    if name == 'MEXC':
+                        base_qty *= basket_decimal(pair['rates'][name]['contract_size'])
+                    # [PATCH 3] require depth with safety multiple
+                    leg_notional = basket_decimal(self.executor.notional)
+                    side_levels = book['asks'] if buy else book['bids']
+                    side_notional = sum(
+                        (basket_decimal(row[0]) * basket_decimal(row[1])
+                         for row in side_levels), Decimal(0))
+                    if side_notional < leg_notional * DEPTH_SAFETY_MULTIPLIER:
+                        raise LiveTradingError(
+                            f"visible depth ${side_notional:.4f} < "
+                            f"{DEPTH_SAFETY_MULTIPLIER}x notional ${leg_notional:.4f}")
+                    # [PATCH 3 end]
+                    prices[name] = depth_vwap(side_levels, base_qty, buy)
+            except Exception as exc:
+                logging.warning(
+                    'Basket VWAP preflight %s | LONG=%s SHORT=%s | VWAP unavailable: %s: %s | BLOCK',
+                    pair['base'], pair['long_exchange'],
+                    'MEXC' if pair['long_exchange'] == 'Bybit' else 'Bybit',
+                    type(exc).__name__, exc)
+                failures.append(f"{pair['base']}: VWAP unavailable ({type(exc).__name__}: {exc})")
+                continue
+            executable = basket_spread(prices['Bybit'], prices['MEXC'])
+            # [PATCH 4] sanity ceiling on executable VWAP spread
+            if abs(executable) > BASKET_MAX_SPREAD:
+                logging.warning(
+                    'Basket VWAP preflight %s | executable_spread=%+.4f%% exceeds ceiling %s%% '
+                    '| likely mismatched instruments | BLOCK',
+                    pair['base'], executable, BASKET_MAX_SPREAD)
+                failures.append(
+                    f"{pair['base']}: executable spread {executable:+.4f}% > "
+                    f"ceiling {BASKET_MAX_SPREAD}%")
+                continue
+            # [PATCH 4 end]
+            passes = (abs(executable) > BASKET_ENTRY_SPREAD and
+                      (executable < 0) == (pair['long_exchange'] == 'Bybit'))
+            status = 'PASS' if passes else 'BLOCK'
+            short_exchange = 'MEXC' if pair['long_exchange'] == 'Bybit' else 'Bybit'
+            logging.info(
+                'Basket VWAP preflight %s | LONG=%s SHORT=%s | '
+                'Bybit VWAP=%s MEXC VWAP=%s | executable_spread=%+.6f%% | '
+                'required abs(spread)>%.3f%%, intended direction | %s',
+                pair['base'], pair['long_exchange'], short_exchange,
+                prices['Bybit'], prices['MEXC'], executable,
+                BASKET_ENTRY_SPREAD, status)
+            if not passes:
+                failures.append(f"{pair['base']}: executable spread {executable:+.6f}%")
+        if stamps and max(stamps) - min(stamps) > 3:
+            failures.append('entry book snapshots are not synchronized')
+        if failures:
+            raise LiveTradingError(
+                'Executable entry preflight blocked: ' + '; '.join(failures) +
+                '; every pair must have abs(VWAP spread) strictly > 0.5% in intended direction')
+
+    def open_basket(self, pairs: list[tuple[Any, Any]], books: dict[str, Any]) -> bool:
+        if not self.can_enter:
+            raise LiveTradingError('New entries blocked until a clean account reconciliation')
+        self.reconcile()
+        plan = self._plan(pairs)
+        self.preflight_books(pairs, books)
+        required = basket_decimal(self.executor.margin) * 3 * Decimal('1.10')
+        balances = self.executor.balance_snapshot()
+        for name in EXCHANGES:
+            available = self.state['paper_wallet'][name] if self.paper_flags[name] else balances.get(name, 0)
+            if basket_decimal(available) < required:
+                raise LiveTradingError(f'{name}: insufficient aggregate margin/fee reserve for three pairs')
+        self.preflight_books(pairs, books)
+        self.state['basket'] = {'id': uuid.uuid4().hex, 'opened_at': self.clock(),
+                                'leverage': self.executor.leverage,
+                                'notional_per_leg': self.executor.notional,
+                                'margin_per_leg': self.executor.margin, 'pairs': plan,
+                                'close_results': {}, 'rollback_results': {}}
+        self.state['phase'] = 'OPENING'
+        self.state['projection'] = None
+        self.state['history'] = []
+        self.reconciled = False
+        self.save_state()
+        try:
+            for index, (a, b) in enumerate(pairs):
+                pair = plan[index]
+                pair['attempted'] = True
+                self.save_state()
+                fills = self.executor.open_pair(a, b, pair['long_exchange'])
+                pair['fills'] = fills
+                self.save_state()
+                for name in EXCHANGES:
+                    fill = fills[name]
+                    qty, price = basket_decimal(fill['base_qty']), basket_decimal(fill['avg_price'])
+                    if min(qty, price, basket_decimal(fill['qty'])) <= 0:
+                        raise LiveTradingError('Invalid returned entry fill')
+                    fee = basket_decimal(fill.get('fee', 0))
+                    fill['fee_source'] = 'reported' if fee > 0 else 'configured_estimate'
+                    fill['fee'] = fee if fee > 0 else qty * price * self.fee_rates[name]
+                spread = basket_spread(fills['Bybit']['avg_price'], fills['MEXC']['avg_price'])
+                if abs(spread) <= BASKET_ENTRY_SPREAD or (spread < 0) != (pair['long_exchange'] == 'Bybit'):
+                    raise EntryRejectedAfterRollback('Actual basket entry fill spread is not strictly > 0.5%')
+                self.save_state()
+            for pair in plan:
+                for name in EXCHANGES:
+                    if self.paper_flags[name]:
+                        self.state['paper_wallet'][name] = basket_decimal(self.state['paper_wallet'][name]) - basket_decimal(pair['fills'][name]['fee'])
+            self.basket['paper_entry_fees_committed'] = True
+            self.state['phase'] = 'OPEN'
+            self.reconcile()
+            self.save_state()
+            logging.warning('BASKET OPEN %s | %s | 6/6 verified | margin/leg=%s notional/leg=%s',
+                            self.basket['id'], ','.join(p['base'] for p in plan),
+                            self.executor.margin, self.executor.notional)
+            return True
+        except Exception as exc:
+            if self.halted:
+                if not str(self.state.get('halt_reason', '')).startswith('Persistence failure'):
+                    self.rollback(f'Entry verification failed: {exc}', ambiguous=True)
+                raise
+            self.rollback(f'Partial/invalid basket entry: {exc}', ambiguous=isinstance(exc, OrderOutcomeUnknown))
+            if isinstance(exc, MexcRegionRestrictedError):
+                raise
+            logging.warning('Basket entry rejected; complete rollback verified: %s', exc)
+            return False
+
+    def _rollback_safe_inventory(self, reason: str = 'pre-rollback inventory') -> None:
+        inventory = self.inventory()
+        self.state['inventory'] = inventory
+        self.basket.setdefault('safety_events', []).append({
+            'time': self.clock(), 'reason': reason, 'inventory': inventory})
+        allowed = self.expected(include_unfilled=True)
+        for name in EXCHANGES:
+            if self.paper_flags[name]:
+                continue
+            for row in inventory[name]['positions']:
+                key = self.position_key(name, row)
+                qty = basket_decimal(row['size'] if name == 'Bybit' else row['holdVol'])
+                if key not in allowed[name] or qty > allowed[name][key]:
+                    self.halt('Unknown/oversized exposure during rollback; no blind liquidation')
+
+    def _verify_flat(self) -> None:
+        settle = (0 if all(self.paper_flags.values()) else
+                  max(0.0, float(getattr(self.executor, 'basket_settle_seconds', POSITION_WAIT_SECONDS))))
+        deadline = time.monotonic() + settle
+        while True:
+            inventory = self.inventory()
+            self.state['inventory'] = inventory
+            self.state['last_reconcile_time'] = self.clock()
+            for name in EXCHANGES:
+                if not self.paper_flags[name] and (inventory[name]['positions'] or inventory[name]['orders']):
+                    raise LiveTradingError(f'{name}: flatten not confirmed; residual positions/orders')
+            if time.monotonic() >= deadline:
+                self.state['verified_legs'] = 0
+                return
+            time.sleep(min(0.25, max(0, deadline - time.monotonic())))
+
+    def rollback(self, reason: str, ambiguous: bool = False) -> None:
+        self.state['phase'] = 'ROLLING_BACK'
+        self.state['basket']['rollback_reason'] = reason
+        self.save_state()
+        errors = []
+        try:
+            self._rollback_safe_inventory()
+            self.save_state()
+            for pair in reversed(self.basket['pairs']):
+                if not pair['attempted']:
+                    continue
+                try:
+                    a, b = (self.restore_rate(pair['rates'][name]) for name in EXCHANGES)
+                    result = self.executor.close_pair(a, b, pair['long_exchange'])
+                    self.basket['rollback_results'][pair['base']] = result
+                    self.save_state()
+                except Exception as exc:
+                    if self.halted:
+                        raise
+                    errors.append(f'{pair["base"]}: {exc}')
+            self._verify_flat()
+            if errors or ambiguous:
+                raise LiveTradingError('; '.join(errors) or 'Entry order outcome unknown; late execution cannot be excluded')
+            paper_net = Decimal(0)
+            for pair in self.basket['pairs']:
+                for name, fill in pair['fills'].items():
+                    quantity = basket_decimal(fill['base_qty'])
+                    if not self.paper_flags[name]:
+                        raw = self.basket['rollback_results'].get(pair['base'], {}).get(name)
+                        rows = raw if isinstance(raw, list) else ([raw] if raw else [])
+                        receipt_qty = sum((basket_decimal(row['base_qty']) for row in rows), Decimal(0))
+                        if receipt_qty != quantity:
+                            raise LiveTradingError('Known entry fill has no matching rollback receipt; outcome/accounting unknown')
+                    else:
+                        entry_price = basket_decimal(fill['avg_price'])
+                        buffer_rate = self.extra_slippage_bps / 10000
+                        long = pair['long_exchange'] == name
+                        exit_price = entry_price * (1 - buffer_rate if long else 1 + buffer_rate)
+                        gross = (1 if long else -1) * quantity * (exit_price - entry_price)
+                        entry_fee = basket_decimal(fill.get('fee', quantity * entry_price * self.fee_rates[name]))
+                        exit_fee = quantity * exit_price * self.fee_rates[name]
+                        debit = Decimal(0) if self.basket.get('paper_entry_fees_committed') else entry_fee
+                        self.state['paper_wallet'][name] = basket_decimal(self.state['paper_wallet'][name]) + gross - exit_fee - debit
+                        paper_net += gross - entry_fee - exit_fee
+            self.basket['paper_rollback_net_estimate'] = paper_net
+        except Exception as exc:
+            self.halt(f'Rollback NOT confirmed: {exc}; all intended legs/fills retained')
+        self.basket['status'] = 'ROLLED_BACK'
+        self.state['archive'].append(self.basket)
+        self.state['basket'] = None
+        self.state['phase'] = 'FLAT'
+        self.state['verified_legs'] = 0
+        self.state['projection_valid'] = False
+        self.reconciled = True
+        self.save_state()
+
+    def emergency_flatten_known(self, reason: str) -> None:
+        if not self.basket:
+            self.halt(reason)
+        self.rollback(reason, ambiguous=True)
+
+    def update_projection(self, books: dict[str, Any]) -> dict[str, Any]:
+        if self.state['phase'] != 'OPEN' or self.state['verified_legs'] != 6 or not self.reconciled:
+            raise LiveTradingError('Projection/exit prohibited without six verified legs')
+        try:
+            result = project_basket(self.basket, books, self.fee_rates, self.extra_slippage_bps, self.clock())
+        except Exception:
+            self.state['projection_valid'] = False
+            self.save_state()
+            raise
+        self.state['projection'] = result
+        self.state['projection_valid'] = True
+        self.state['history'].append({'t': self.clock(), 'basket_id': self.basket['id'],
+                                      'projected_net': str(result['projected_net'])})
+        self.state['history'] = self.state['history'][-getattr(self, 'history_limit', 360):]
+        self.save_state()
+        logging.info('BASKET PNL %s gross=%s entry_fees=%s projected_exit_fees=%s '
+                     'projected_slippage=%s projected_net=%s distance=%s components=%s',
+                     self.basket['id'], result['gross'], result['entry_fees'],
+                     result['projected_exit_fees'], result['projected_slippage'],
+                     result['projected_net'], result['distance_to_target'], result['components'])
+        return result
+
+    def close_if_target(self, books: dict[str, Any]) -> bool:
+        self.reconcile()
+        projection = self.update_projection(books)
+        if projection['projected_net'] < BASKET_NET_TARGET:
+            return False
+        self.state['phase'] = 'CLOSING'
+        self.basket['exit_trigger_projection'] = projection
+        self.reconciled = False
+        self.save_state()
+        try:
+            errors = []
+            for pair in self.basket['pairs']:
+                a, b = (self.restore_rate(pair['rates'][name]) for name in EXCHANGES)
+                try:
+                    self._rollback_safe_inventory('pre-basket-exit inventory')
+                    self.save_state()
+                    result = self.executor.close_pair(a, b, pair['long_exchange'])
+                    self.basket['close_results'][pair['base']] = result
+                    self.save_state()
+                except Exception as exc:
+                    if self.halted:
+                        raise
+                    errors.append(f'{pair["base"]}: {exc}')
+                    self.basket.setdefault('close_errors', {})[pair['base']] = str(exc)
+                    self.save_state()
+            self._verify_flat()
+            if errors:
+                raise LiveTradingError('; '.join(errors))
+            gross = entry_fees = exit_fees = Decimal(0)
+            paper_changes = {k: Decimal(0) for k in EXCHANGES}
+            for pair in self.basket['pairs']:
+                for name in EXCHANGES:
+                    opened = pair['fills'][name]
+                    quantity = basket_decimal(opened['base_qty'])
+                    if self.paper_flags[name]:
+                        price = basket_decimal(projection['exit_prices'][pair['base']][name])
+                        fee = quantity * price * self.fee_rates[name]
+                    else:
+                        raw = self.basket['close_results'][pair['base']].get(name)
+                        rows = raw if isinstance(raw, list) else ([raw] if raw else [])
+                        closed_qty = sum((basket_decimal(row['base_qty']) for row in rows), Decimal(0))
+                        if closed_qty != quantity:
+                            raise LiveTradingError('Flat account but exit fill quantity/accounting unknown; ledger retained')
+                        price = sum((basket_decimal(row['base_qty']) * basket_decimal(row['avg_price']) for row in rows), Decimal(0)) / quantity
+                        fee = sum((basket_decimal(row.get('fee', 0)) for row in rows), Decimal(0))
+                        if fee <= 0:
+                            fee = quantity * price * self.fee_rates[name]
+                    sign = Decimal(1) if name == pair['long_exchange'] else Decimal(-1)
+                    leg_gross = sign * quantity * (price - basket_decimal(opened['avg_price']))
+                    gross += leg_gross
+                    entry_fees += basket_decimal(opened['fee'])
+                    exit_fees += fee
+                    if self.paper_flags[name]:
+                        paper_changes[name] += leg_gross - fee
+            self.basket['status'] = 'CLOSED'
+            self.basket['closed_at'] = self.clock()
+            self.basket['accounting'] = {'gross': gross, 'entry_fees': entry_fees,
+                                         'exit_fees': exit_fees, 'net': gross - entry_fees - exit_fees,
+                                         'kind': 'fill_based_with_configured_fee_fallback'}
+            for name in EXCHANGES:
+                self.state['paper_wallet'][name] = basket_decimal(self.state['paper_wallet'][name]) + paper_changes[name]
+            logging.warning('BASKET CLOSE %s | projected=%s | fill-based net=%s '
+                            '(not guaranteed; estimated fees may differ)', self.basket['id'],
+                            projection['projected_net'], self.basket['accounting']['net'])
+            self.state['archive'].append(self.basket)
+            self.state['basket'] = None
+            self.state['phase'] = 'FLAT'
+            self.state['verified_legs'] = 0
+            self.state['projection_valid'] = False
+            self.reconciled = True
+            self.executor.margin, self.executor.leverage, self.executor.notional = self.requested_sizing
+            for name in ('configured_bybit', 'configured_mexc'):
+                if hasattr(self.executor, name):
+                    getattr(self.executor, name).clear()
+            self.save_state()
+            return True
+        except Exception as exc:
+            self.halt(f'Basket exit incomplete/unknown: {exc}; closing journal retained')
+        return False
+
+    def close(self) -> None:
+        if self._lock_file and not self._lock_file.closed:
+            _unlock_state_file(self._lock_file)
+            self._lock_file.close()
