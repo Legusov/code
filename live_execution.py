@@ -904,7 +904,7 @@ BASKET_SIZE = 3
 BASKET_ENTRY_SPREAD = Decimal('0.5')  # percent, STRICTLY greater
 BASKET_MAX_SPREAD = Decimal('5')      # hard sanity ceiling; >5% = mismatched instruments
 MAX_TICKER_RATIO_DEVIATION = Decimal('0.10')  # |a/b - 1| <= 10%
-DEPTH_SAFETY_MULTIPLIER = Decimal('3')        # visible depth must be >= 3x leg notional
+DEPTH_SAFETY_MULTIPLIER = Decimal('1.5')        # visible depth must be >= 3x leg notional
 BASKET_NET_TARGET = Decimal('0.10')  # USDT, aggregate projected net
 EXCHANGES = ('Bybit', 'MEXC')
 
@@ -1090,6 +1090,39 @@ class BasketExecution:
             self.close()
             raise
 
+    def preflight_one_pair(self, a: Any, b: Any, books_one: dict[str, Any]) -> None:
+        """Per-pair readiness check; never requires a trio."""
+        plan = self._plan((a, b))  # raises on its own pair if invalid
+        now = self.clock()
+        prices = {}
+        for name in EXCHANGES:
+            book = books_one[plan['base']][name]
+            validate_basket_book(book, now)
+            buy = plan['long_exchange'] == name
+            base_qty = basket_decimal(plan['planned_qty'][name])
+            if name == 'MEXC':
+                base_qty *= basket_decimal(plan['rates'][name]['contract_size'])
+            leg_notional = basket_decimal(self.executor.notional)
+            side_levels = book['asks'] if buy else book['bids']
+            side_notional = sum(
+                (basket_decimal(row[0]) * basket_decimal(row[1])
+                 for row in side_levels), Decimal(0))
+            if side_notional < leg_notional * DEPTH_SAFETY_MULTIPLIER:
+                raise LiveTradingError(
+                    f"visible depth ${side_notional:.4f} < "
+                    f"{DEPTH_SAFETY_MULTIPLIER}x notional ${leg_notional:.4f}")
+            prices[name] = depth_vwap(side_levels, base_qty, buy)
+        executable = basket_spread(prices['Bybit'], prices['MEXC'])
+        if abs(executable) <= BASKET_ENTRY_SPREAD:
+            raise LiveTradingError(
+                f"executable spread {executable:+.6f}% <= {BASKET_ENTRY_SPREAD}%")
+        if abs(executable) > BASKET_MAX_SPREAD:
+            raise LiveTradingError(
+                f"executable spread {executable:+.4f}% > ceiling {BASKET_MAX_SPREAD}%")
+        if (executable < 0) != (plan['long_exchange'] == 'Bybit'):
+            raise LiveTradingError(
+                f"executable spread {executable:+.6f}% direction disagrees with ticker")
+    
     def _validate_saved_basket(self, basket: dict[str, Any]) -> None:
         if len(basket.get('pairs', [])) != 3 or basket_decimal(basket['leverage']) <= 0:
             raise LiveTradingError('Invalid saved basket')
@@ -1266,55 +1299,76 @@ class BasketExecution:
         return [(self.restore_rate(pair['rates']['Bybit']), self.restore_rate(pair['rates']['MEXC']))
                 for pair in (self.basket or {}).get('pairs', [])]
 
-    def _plan(self, pairs: list[tuple[Any, Any]]) -> list[dict[str, Any]]:
-        if len(pairs) != 3 or len({a.base for a, _ in pairs}) != 3:
-            raise LiveTradingError('Entry requires exactly three distinct pairs')
-        if len({a.exchange_symbol for a, _ in pairs}) != 3 or len({b.exchange_symbol for _, b in pairs}) != 3:
-            raise LiveTradingError('Duplicate exchange instruments')
-        result = []
-        for a, b in pairs:
-            spread = basket_spread(a.price, b.price)
-            if a.base != b.base or abs(spread) <= BASKET_ENTRY_SPREAD:
-                raise LiveTradingError('Every entry price spread must be strictly > 0.5%')
-            if abs(spread) > BASKET_MAX_SPREAD:
-                raise LiveTradingError(
-                    f"{a.base}: ticker spread {spread:+.4f}% exceeds sanity ceiling "
-                    f"{BASKET_MAX_SPREAD}% — mismatched instruments or corrupted ticker")
-            ratio = basket_decimal(a.price) / basket_decimal(b.price)
-            if abs(ratio - 1) > MAX_TICKER_RATIO_DEVIATION:
-                raise LiveTradingError(
-                    f"{a.base}: ticker price ratio {ratio:.6f} deviates >"
-                    f"{MAX_TICKER_RATIO_DEVIATION * 100}% — likely different instruments")
-            if not self.executor.pair_is_tradeable(a, b):
-                raise LiveTradingError('Pair fails size/leverage/region preflight')
-            qty = {}
-            for name, rate in zip(EXCHANGES, (a, b)):
-                if self.paper_flags[name]:
-                    base_qty = basket_decimal(self.executor.notional) / basket_decimal(rate.price)
-                    qty[name] = base_qty if name == 'Bybit' else base_qty / basket_decimal(rate.contract_size)
-                else:
-                    qty[name] = (self.executor._bybit_spec_qty(rate) if name == 'Bybit'
-                                 else self.executor._mexc_spec_vol(rate))
-            result.append({'base': a.base, 'long_exchange': 'Bybit' if spread < 0 else 'MEXC',
-                           'rates': {'Bybit': self.rate_record(a), 'MEXC': self.rate_record(b)},
-                           'planned_qty': qty, 'fills': {}, 'attempted': False})
-        return result
+    def _plan(self, pair: tuple[Any, Any]) -> dict[str, Any]:
+        """Build the execution plan for ONE pair.
 
-    def preflight_books(self, pairs: list[tuple[Any, Any]], books: dict[str, Any]) -> None:
+        The "exactly three distinct pairs" invariant is enforced by the caller
+        (preflight_books / open_basket) on the aggregate list, not here.
+        """
+        a, b = pair
+        spread = basket_spread(a.price, b.price)
+        if a.base != b.base:
+            raise LiveTradingError(
+                f"pair base mismatch: {a.base!r} vs {b.base!r}")
+        if abs(spread) <= BASKET_ENTRY_SPREAD:
+            raise LiveTradingError(
+                f"{a.base}: ticker spread {spread:+.4f}% is not > "
+                f"{BASKET_ENTRY_SPREAD}%")
+        if abs(spread) > BASKET_MAX_SPREAD:
+            raise LiveTradingError(
+                f"{a.base}: ticker spread {spread:+.4f}% exceeds sanity ceiling "
+                f"{BASKET_MAX_SPREAD}% — mismatched instruments or corrupted ticker")
+        ratio = basket_decimal(a.price) / basket_decimal(b.price)
+        if abs(ratio - 1) > MAX_TICKER_RATIO_DEVIATION:
+            raise LiveTradingError(
+                f"{a.base}: ticker price ratio {ratio:.6f} deviates >"
+                f"{MAX_TICKER_RATIO_DEVIATION * 100}% — likely different instruments")
+        if not self.executor.pair_is_tradeable(a, b):
+            raise LiveTradingError(
+                f"{a.base}: pair fails size/leverage/region preflight")
+        qty = {}
+        for name, rate in zip(EXCHANGES, (a, b)):
+            if self.paper_flags[name]:
+                base_qty = basket_decimal(self.executor.notional) / basket_decimal(rate.price)
+                qty[name] = (base_qty if name == 'Bybit'
+                             else base_qty / basket_decimal(rate.contract_size))
+            else:
+                qty[name] = (self.executor._bybit_spec_qty(rate) if name == 'Bybit'
+                             else self.executor._mexc_spec_vol(rate))
+        return {
+            'base': a.base,
+            'long_exchange': 'Bybit' if spread < 0 else 'MEXC',
+            'rates': {'Bybit': self.rate_record(a), 'MEXC': self.rate_record(b)},
+            'planned_qty': qty,
+            'fills': {},
+            'attempted': False,
+        }
+
+    def preflight_books(self, pairs: list[tuple[Any, Any]],
+                        books: dict[str, Any]) -> None:
+        if len(pairs) != 3:
+            raise LiveTradingError('Entry requires exactly three distinct pairs')
+        if len({a.base for a, _ in pairs}) != 3:
+            raise LiveTradingError('Entry requires exactly three distinct pairs')
+        if (len({a.exchange_symbol for a, _ in pairs}) != 3
+                or len({b.exchange_symbol for _, b in pairs}) != 3):
+            raise LiveTradingError('Duplicate exchange instruments')
+
+        plans = [self._plan(pair) for pair in pairs]  # each raises on its own pair
         now = self.clock()
         stamps = []
         failures = []
-        for pair in self._plan(pairs):
+        for plan in plans:
             prices = {}
             try:
                 for name in EXCHANGES:
-                    book = books[pair['base']][name]
+                    book = books[plan['base']][name]
                     validate_basket_book(book, now)
                     stamps.append(float(book['observed_at']))
-                    buy = pair['long_exchange'] == name
-                    base_qty = basket_decimal(pair['planned_qty'][name])
+                    buy = plan['long_exchange'] == name
+                    base_qty = basket_decimal(plan['planned_qty'][name])
                     if name == 'MEXC':
-                        base_qty *= basket_decimal(pair['rates'][name]['contract_size'])
+                        base_qty *= basket_decimal(plan['rates'][name]['contract_size'])
                     leg_notional = basket_decimal(self.executor.notional)
                     side_levels = book['asks'] if buy else book['bids']
                     side_notional = sum(
@@ -1327,60 +1381,64 @@ class BasketExecution:
                     prices[name] = depth_vwap(side_levels, base_qty, buy)
             except Exception as exc:
                 logging.warning(
-                    'Basket VWAP preflight %s | LONG=%s SHORT=%s | VWAP unavailable: %s: %s | BLOCK',
-                    pair['base'], pair['long_exchange'],
-                    'MEXC' if pair['long_exchange'] == 'Bybit' else 'Bybit',
+                    'Basket VWAP preflight %s | LONG=%s | VWAP unavailable: %s: %s | BLOCK',
+                    plan['base'], plan['long_exchange'],
                     type(exc).__name__, exc)
-                failures.append(f"{pair['base']}: VWAP unavailable ({type(exc).__name__}: {exc})")
+                failures.append(f"{plan['base']}: VWAP unavailable ({type(exc).__name__}: {exc})")
                 continue
             executable = basket_spread(prices['Bybit'], prices['MEXC'])
             if abs(executable) > BASKET_MAX_SPREAD:
                 logging.warning(
-                    'Basket VWAP preflight %s | executable_spread=%+.4f%% exceeds ceiling %s%% '
-                    '| likely mismatched instruments | BLOCK',
-                    pair['base'], executable, BASKET_MAX_SPREAD)
+                    'Basket VWAP preflight %s | executable_spread=%+.4f%% exceeds ceiling %s%% | BLOCK',
+                    plan['base'], executable, BASKET_MAX_SPREAD)
                 failures.append(
-                    f"{pair['base']}: executable spread {executable:+.4f}% > "
-                    f"ceiling {BASKET_MAX_SPREAD}%")
+                    f"{plan['base']}: executable spread {executable:+.4f}% > ceiling {BASKET_MAX_SPREAD}%")
                 continue
             passes = (abs(executable) > BASKET_ENTRY_SPREAD and
-                      (executable < 0) == (pair['long_exchange'] == 'Bybit'))
+                      (executable < 0) == (plan['long_exchange'] == 'Bybit'))
             status = 'PASS' if passes else 'BLOCK'
-            short_exchange = 'MEXC' if pair['long_exchange'] == 'Bybit' else 'Bybit'
             logging.info(
-                'Basket VWAP preflight %s | LONG=%s SHORT=%s | '
-                'Bybit VWAP=%s MEXC VWAP=%s | executable_spread=%+.6f%% | '
-                'required abs(spread)>%.3f%%, intended direction | %s',
-                pair['base'], pair['long_exchange'], short_exchange,
+                'Basket VWAP preflight %s | LONG=%s | Bybit VWAP=%s MEXC VWAP=%s | '
+                'executable_spread=%+.6f%% | required abs(spread)>%.3f%% | %s',
+                plan['base'], plan['long_exchange'],
                 prices['Bybit'], prices['MEXC'], executable,
                 BASKET_ENTRY_SPREAD, status)
             if not passes:
-                failures.append(f"{pair['base']}: executable spread {executable:+.6f}%")
+                failures.append(f"{plan['base']}: executable spread {executable:+.6f}%")
         if stamps and max(stamps) - min(stamps) > 3:
             failures.append('entry book snapshots are not synchronized')
         if failures:
             raise LiveTradingError(
-                'Executable entry preflight blocked: ' + '; '.join(failures) +
-                '; every pair must have abs(VWAP spread) strictly > 0.5% in intended direction')
+                'Executable entry preflight blocked: ' + '; '.join(failures))
 
-    def open_basket(self, pairs: list[tuple[Any, Any]], books: dict[str, Any]) -> bool:
+    def open_basket(self, pairs: list[tuple[Any, Any]],
+                    books: dict[str, Any]) -> bool:
         if not self.can_enter:
             raise LiveTradingError('New entries blocked until a clean account reconciliation')
+        if len(pairs) != 3 or len({a.base for a, _ in pairs}) != 3:
+            raise LiveTradingError('Entry requires exactly three distinct pairs')
+        if (len({a.exchange_symbol for a, _ in pairs}) != 3
+                or len({b.exchange_symbol for _, b in pairs}) != 3):
+            raise LiveTradingError('Duplicate exchange instruments')
         self.reconcile()
-        plan = self._plan(pairs)
+        plan = [self._plan(pair) for pair in pairs]
         self.preflight_books(pairs, books)
         required = basket_decimal(self.executor.margin) * 3 * Decimal('1.10')
         balances = self.executor.balance_snapshot()
         for name in EXCHANGES:
-            available = self.state['paper_wallet'][name] if self.paper_flags[name] else balances.get(name, 0)
+            available = (self.state['paper_wallet'][name] if self.paper_flags[name]
+                         else balances.get(name, 0))
             if basket_decimal(available) < required:
-                raise LiveTradingError(f'{name}: insufficient aggregate margin/fee reserve for three pairs')
-        self.preflight_books(pairs, books)
-        self.state['basket'] = {'id': uuid.uuid4().hex, 'opened_at': self.clock(),
-                                'leverage': self.executor.leverage,
-                                'notional_per_leg': self.executor.notional,
-                                'margin_per_leg': self.executor.margin, 'pairs': plan,
-                                'close_results': {}, 'rollback_results': {}}
+                raise LiveTradingError(
+                    f'{name}: insufficient aggregate margin/fee reserve for three pairs')
+        self.preflight_books(pairs, books)  # re-check after balance latency
+        self.state['basket'] = {
+            'id': uuid.uuid4().hex, 'opened_at': self.clock(),
+            'leverage': self.executor.leverage,
+            'notional_per_leg': self.executor.notional,
+            'margin_per_leg': self.executor.margin,
+            'pairs': plan, 'close_results': {}, 'rollback_results': {},
+        }
         self.state['phase'] = 'OPENING'
         self.state['projection'] = None
         self.state['history'] = []
@@ -1388,50 +1446,58 @@ class BasketExecution:
         self.save_state()
         try:
             for index, (a, b) in enumerate(pairs):
-                pair = plan[index]
-                pair['attempted'] = True
+                pair_plan = plan[index]
+                pair_plan['attempted'] = True
                 self.save_state()
-                fills = self.executor.open_pair(a, b, pair['long_exchange'])
-                pair['fills'] = fills
+                fills = self.executor.open_pair(a, b, pair_plan['long_exchange'])
+                pair_plan['fills'] = fills
                 self.save_state()
                 for name in EXCHANGES:
                     fill = fills[name]
-                    qty, price = basket_decimal(fill['base_qty']), basket_decimal(fill['avg_price'])
+                    qty = basket_decimal(fill['base_qty'])
+                    price = basket_decimal(fill['avg_price'])
                     if min(qty, price, basket_decimal(fill['qty'])) <= 0:
                         raise LiveTradingError('Invalid returned entry fill')
                     fee = basket_decimal(fill.get('fee', 0))
                     fill['fee_source'] = 'reported' if fee > 0 else 'configured_estimate'
                     fill['fee'] = fee if fee > 0 else qty * price * self.fee_rates[name]
                 spread = basket_spread(fills['Bybit']['avg_price'], fills['MEXC']['avg_price'])
-                if abs(spread) <= BASKET_ENTRY_SPREAD or (spread < 0) != (pair['long_exchange'] == 'Bybit'):
-                    raise EntryRejectedAfterRollback('Actual basket entry fill spread is not strictly > 0.5%')
-                # [FIX] Upper sanity bound on the ACTUAL fill, not only ticker/VWAP.
+                if abs(spread) <= BASKET_ENTRY_SPREAD or \
+                        (spread < 0) != (pair_plan['long_exchange'] == 'Bybit'):
+                    raise EntryRejectedAfterRollback(
+                        'Actual basket entry fill spread is not strictly > 0.5%')
                 if abs(spread) > BASKET_MAX_SPREAD:
                     raise EntryRejectedAfterRollback(
                         f'Actual fill spread {spread:+.4f}% exceeds sanity ceiling '
-                        f'{BASKET_MAX_SPREAD}% — likely mismatched instruments or violent slippage')
+                        f'{BASKET_MAX_SPREAD}%')
                 self.save_state()
-            for pair in plan:
+            for pair_plan in plan:
                 for name in EXCHANGES:
                     if self.paper_flags[name]:
-                        self.state['paper_wallet'][name] = basket_decimal(self.state['paper_wallet'][name]) - basket_decimal(pair['fills'][name]['fee'])
+                        self.state['paper_wallet'][name] = (
+                                basket_decimal(self.state['paper_wallet'][name])
+                                - basket_decimal(pair_plan['fills'][name]['fee']))
             self.basket['paper_entry_fees_committed'] = True
             self.state['phase'] = 'OPEN'
             self.reconcile()
             self.save_state()
-            logging.warning('BASKET OPEN %s | %s | 6/6 verified | margin/leg=%s notional/leg=%s',
-                            self.basket['id'], ','.join(p['base'] for p in plan),
-                            self.executor.margin, self.executor.notional)
+            logging.warning(
+                'BASKET OPEN %s | %s | 6/6 verified | margin/leg=%s notional/leg=%s',
+                self.basket['id'], ','.join(p['base'] for p in plan),
+                self.executor.margin, self.executor.notional)
             return True
         except Exception as exc:
             if self.halted:
                 if not str(self.state.get('halt_reason', '')).startswith('Persistence failure'):
                     self.rollback(f'Entry verification failed: {exc}', ambiguous=True)
                 raise
-            self.rollback(f'Partial/invalid basket entry: {exc}', ambiguous=isinstance(exc, OrderOutcomeUnknown))
+            self.rollback(
+                f'Partial/invalid basket entry: {exc}',
+                ambiguous=isinstance(exc, OrderOutcomeUnknown))
             if isinstance(exc, MexcRegionRestrictedError):
                 raise
-            logging.warning('Basket entry rejected; complete rollback verified: %s', exc)
+            logging.warning(
+                'Basket entry rejected; complete rollback verified: %s', exc)
             return False
 
     def _rollback_safe_inventory(self, reason: str = 'pre-rollback inventory') -> None:

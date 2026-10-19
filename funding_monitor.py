@@ -259,14 +259,14 @@ def orderbook_liquidity(a: Rate, b: Rate, notional: Decimal, long_exchange: str,
                         timeout: int = TIMEOUT) -> tuple[bool, Decimal, Decimal]:
     def bybit_book() -> dict[str, Any]:
         payload = get_json(f"{BYBIT}/v5/market/orderbook",
-                           {"category": "linear", "symbol": a.exchange_symbol, "limit": 50}, timeout)
+                           {"category": "linear", "symbol": a.exchange_symbol, "limit": 200}, timeout)
         if payload.get("retCode") != 0:
             raise RuntimeError(f"Bybit orderbook {a.exchange_symbol}: {payload.get('retMsg')}")
         return payload.get("result", {})
 
     def mexc_book() -> dict[str, Any]:
         payload = mexc_get_json(f"{MEXC}/api/v1/contract/depth/{b.exchange_symbol}",
-                                {"limit": 50}, timeout=timeout, max_attempts=2)
+                                {"limit": 200}, timeout=timeout, max_attempts=2)
         if not payload.get("success"):
             raise RuntimeError(f"MEXC orderbook {b.exchange_symbol}: {payload}")
         return payload.get("data", {})
@@ -971,7 +971,7 @@ class BasketTradingController(LiveTradingController):
         self.entry_spread_threshold = max(BASKET_ENTRY_SPREAD, basket_decimal(entry_spread_threshold))
         self._pair_ready: dict[str, dict[str, Any]] = {}
         # [FIX 1] TTL 20s: 6 reserve pairs × ~1-2s per-pair API latency fits budget.
-        self.pair_ready_ttl = 20.0
+        self.pair_ready_ttl = 30.0
         # Reserve of pairs that passed the preliminary filters; substitute
         # candidates are drawn from here if the first trio fails preflight.
         self.reserve: list[tuple[Rate, Rate]] = []
@@ -1047,11 +1047,31 @@ class BasketTradingController(LiveTradingController):
         # [FIX 2] Anchor each pair's expiry to the moment its own check finished,
         # not the tick's start, so a slow API does not expire earlier pairs.
         for a, b in pairs:
-            prices = current_prices.get(a.base)
-            if not prices or abs(basket_spread(*prices)) <= self.entry_spread_threshold:
+            # [FIX-A] One snapshot per pair: mid-price for direction, VWAP for
+            # readiness — same books. Removes ticker/VWAP desync and one extra
+            # book_provider call per pair.
+            try:
+                books_one = self.book_provider([(a, b)])
+            except Exception as exc:
+                logging.warning('Basket candidate %s: book fetch failed: %s', a.base, exc)
                 continue
-            current_a = dataclasses.replace(a, price=prices[0])
-            current_b = dataclasses.replace(b, price=prices[1])
+            bybit_book = books_one[a.base]['Bybit']
+            mexc_book = books_one[a.base]['MEXC']
+            try:
+                bybit_bid = max(basket_decimal(r[0]) for r in bybit_book['bids'])
+                bybit_ask = min(basket_decimal(r[0]) for r in bybit_book['asks'])
+                mexc_bid = max(basket_decimal(r[0]) for r in mexc_book['bids'])
+                mexc_ask = min(basket_decimal(r[0]) for r in mexc_book['asks'])
+            except ValueError:
+                logging.info('Basket candidate %s: empty orderbook side', a.base)
+                continue
+            bybit_mid = (bybit_bid + bybit_ask) / Decimal(2)
+            mexc_mid = (mexc_bid + mexc_ask) / Decimal(2)
+            spread = basket_spread(bybit_mid, mexc_mid)
+            if abs(spread) <= self.entry_spread_threshold:
+                continue
+            current_a = dataclasses.replace(a, price=bybit_mid)
+            current_b = dataclasses.replace(b, price=mexc_mid)
             if not self.candidate_tradeable(current_a, current_b):
                 continue
             if time.monotonic() < self._entry_retry_after.get(current_b.exchange_symbol, 0.0):
@@ -1066,8 +1086,7 @@ class BasketTradingController(LiveTradingController):
                     self._block_mexc_region_symbol(current_b.exchange_symbol, 'apiAllowed=false')
                     continue
             try:
-                books_one = self.book_provider([(current_a, current_b)])
-                self.engine.preflight_books([(current_a, current_b)], books_one)
+                self.engine.preflight_one_pair(current_a, current_b, books_one)
             except Exception as exc:
                 logging.info('Basket candidate %s not ready: %s', current_a.base, exc)
                 continue
@@ -1075,7 +1094,6 @@ class BasketTradingController(LiveTradingController):
                 'a': current_a, 'b': current_b, 'books': books_one,
                 'expires_at': time.monotonic() + self.pair_ready_ttl,
             }
-
         now = time.monotonic()
         for base in [k for k, v in self._pair_ready.items() if v['expires_at'] <= now]:
             self._pair_ready.pop(base, None)
@@ -1140,35 +1158,44 @@ def basket_orderbooks(pairs: list[tuple[Rate, Rate]]) -> dict[str, Any]:
         def bybit_book() -> dict[str, Any]:
             observed_at = time.time()
             payload = get_json(f'{BYBIT}/v5/market/orderbook',
-                               {'category': 'linear', 'symbol': a.exchange_symbol, 'limit': 50}, LIVE_TIMEOUT)
+                               {'category': 'linear', 'symbol': a.exchange_symbol, 'limit': 200}, LIVE_TIMEOUT)
             if payload.get('retCode') != 0:
                 raise RuntimeError('Bybit basket orderbook response rejected')
             raw = payload['result']
             return {'bids': raw.get('b', []), 'asks': raw.get('a', []), 'observed_at': observed_at}
+
         def mexc_book() -> dict[str, Any]:
             observed_at = time.time()
             payload = mexc_get_json(f'{MEXC}/api/v1/contract/depth/{b.exchange_symbol}',
-                                    {'limit': 50}, timeout=LIVE_TIMEOUT, max_attempts=1)
+                                    {'limit': 200}, timeout=LIVE_TIMEOUT, max_attempts=1)
             if not payload.get('success'):
                 raise RuntimeError('MEXC basket orderbook response rejected')
             raw = payload['data']
             if b.contract_size <= 0:
                 raise RuntimeError('Missing MEXC contractSize; depth cannot be normalized')
+
             def base_levels(rows: list[Any]) -> list[Any]:
                 result = []
                 for row in rows:
                     if len(row) < 3:
                         raise RuntimeError('MEXC depth must include price/count/volume')
-                    result.append([row[0], basket_decimal(row[2]) * b.contract_size])
+                    # MEXC depth returns price already in USDT (per contract),
+                    # and volume in contracts. Only size needs normalization
+                    # into base units; multiplying price by contract_size would
+                    # inflate the MEXC VWAP by contract_size.
+                    price_usdt = basket_decimal(row[0])
+                    size_base = basket_decimal(row[2]) * b.contract_size
+                    result.append([price_usdt, size_base])
                 return result
-            return {'bids': base_levels(raw.get('bids', [])), 'asks': base_levels(raw.get('asks', [])),
+
+            return {'bids': base_levels(raw.get('bids', [])),
+                    'asks': base_levels(raw.get('asks', [])),
                     'observed_at': observed_at}
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix='basket-book-leg') as pool:
             bf, mf = pool.submit(bybit_book), pool.submit(mexc_book)
             return a.base, {'Bybit': bf.result(), 'MEXC': mf.result()}
     with ThreadPoolExecutor(max_workers=3, thread_name_prefix='basket-books') as pool:
         return dict(pool.map(lambda pair: fetch_pair(*pair), pairs))
-
 
 def run_basket_monitor(args: Any, paper_flags: dict[str, bool], mode_profile: str) -> None:
     state_file = args.state_file or Path(f'{mode_profile}_state.json')
@@ -1242,8 +1269,12 @@ def run_basket_monitor(args: Any, paper_flags: dict[str, bool], mode_profile: st
                         all_selected_pairs = [(a, b) for a, b in all_selected_pairs
                                               if controller.candidate_tradeable(a, b)]
                     controller.reserve = all_selected_pairs  # full pool for substitution
-                    monitored = all_selected_pairs[:BASKET_SIZE] if len(all_selected_pairs) >= BASKET_SIZE else []
-                    entries_allowed = len(all_selected_pairs) >= BASKET_SIZE and engine.can_enter
+                    monitored = (all_selected_pairs[:BASKET_SIZE]
+                                 if len(all_selected_pairs) >= BASKET_SIZE else [])
+                    # [FIX] Do NOT require 3 pairs here. `process_basket` fills
+                    # `_pair_ready` from whatever reserve exists; entry fires
+                    # only when that buffer itself reaches BASKET_SIZE.
+                    entries_allowed = bool(all_selected_pairs) and engine.can_enter
                     monitored_bases = {a.base for a, _ in monitored}
                     selected_bases = {item[1].base for item in selected}
                     for row in scan_report:
@@ -1269,10 +1300,11 @@ def run_basket_monitor(args: Any, paper_flags: dict[str, bool], mode_profile: st
                             f"LONG {row['long_exchange']} / SHORT {row['short_exchange']} | "
                             f"{depth} | {row['status']}: {row['reason']}")
                     dashboard.update_candidate_status(summaries, scan_report)
-                    # [FIX 5] "pairs checked" — each pair fetches 2 orderbooks.
+                    # [FIX] Report reserve = controller.reserve - monitored so the
+                    # log stops saying "0 reserve" when there are 2 selected.
                     logging.info('Basket scan: %s monitored + %s reserve = %s total, %s pairs checked',
-                                 len(monitored), max(0, len(all_selected_pairs) - BASKET_SIZE),
-                                 len(all_selected_pairs), checked)
+                                 len(monitored), len(controller.reserve) - len(monitored),
+                                 len(controller.reserve), checked)
                 except LiveTradingError:
                     raise
                 except Exception as exc:
@@ -1293,7 +1325,12 @@ def run_basket_monitor(args: Any, paper_flags: dict[str, bool], mode_profile: st
                     simulator.notional = basket_decimal(executor.notional)
                     next_scan = time.monotonic() + args.candidate_delay_sec
                     controller.refresh_balances()
-            elif entries_allowed:
+            # [FIX] Run the entry poller whenever `reserve` is non-empty OR
+            # `entries_allowed` is set. Previously the block was gated on
+            # `entries_allowed`, which required 3 pairs from the last scan;
+            # with 2 pairs the poller never ran, `_pair_ready` never filled,
+            # and the pair-readiness buffer could never reach BASKET_SIZE.
+            elif entries_allowed or controller.reserve:
                 if time.monotonic() >= next_entry_poll:
                     try:
                         prices = live_prices_many(controller.reserve)
@@ -1349,7 +1386,6 @@ def run_basket_monitor(args: Any, paper_flags: dict[str, bool], mode_profile: st
             if dashboard:
                 dashboard.close()
             engine.close()
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Сравнение предстоящих funding Bybit и MEXC")
