@@ -1,0 +1,98 @@
+BYBIT DEMO COMPLEX DIAGNOSTIC (READ ONLY; NO ORDERS SENT)
+Time local: 2026-11-02T22:13:26+03:00
+Time UTC:   2026-11-02T19:13:26+00:00
+Working directory: C:\Users\PRO\PycharmProjects\syntech
+State file: C:\Users\PRO\PycharmProjects\syntech\state.json
+State modified: 2026-11-02T22:13:16+03:00
+Active complexes: 6 | Reserve: 2
+Connecting to Bybit Demo (read-only endpoints only)...
+Position pages: 2 | Open positions received: 36
+
+COMPLEX #1: VVVUSDT/LINKUSDT/BCHUSDT | ZECUSDT/HYPEUSDT/INJUSDT
+  target=3.33333333 | realized_pnl(state)=0.00000000 | layers=1 | close_pending=False | hedge_open=False
+  SYMBOL        SIDE   SIZE              UNREALIZED_PNL      AVG_PRICE         MARK_PRICE
+  VVVUSDT       Buy    4.28000000        -8.84333600         23.32600000       21.25980000
+  LINKUSDT      Buy    8.40000000        -5.86320000         11.81500000       11.11700000
+  BCHUSDT       Buy    0.35000000        -3.49300000         285.43000000      275.45000000
+  ZECUSDT       Sell   0.07000000        6.82640000          1252.62000000     1155.10000000
+  HYPEUSDT      Sell   1.13000000        5.23642000          88.09300000       83.45900000
+  INJUSDT       Sell   13.70000000       4.28125000          7.29300000        6.98050000
+  unrealized_sum=-1.85546600
+  BOT/DASHBOARD FORMULA: realized + unrealized = -1.85546600
+  target_reached_by_this_snapshot: False
+  missing_active_symbols: none
+
+COMPLEX #2: LSKUSDT/PUMPFUNUSDT/SANDUSDT | RSRUSDT/ZROUSDT/NEARUSDT
+  target=3.33333333 | realized_pnl(state)=0.00000000 | layers=1 | close_pending=False | hedge_open=False
+  SYMBOL        SIDE   SIZE              UNREALIZED_PNL      AVG_PRICE         MARK_PRICE
+  LSKUSDT       Buy    435.40000000      -20.88613800        0.22957000        0.18160000
+  PUMPFUNUSDT   Buy    23400.00000000    -7.23060000         0.00426100        0.00395200
+  SANDUSDT      Buy    2141.00000000     -5.00994000         0.04669000        0.04435000
+  RSRUSDT       Sell   65560.00000000    8.52280000          0.00152530        0.00139530
+  ZROUSDT       Sell   54.80000000       5.24984000          1.82310000        1.72730000
+  NEARUSDT      Sell   22.70000000       11.90842000         4.39600000        3.87140000
+  unrealized_sum=-7.44561800
+  BOT/DASHBOARD FORMULA: realized + unrealized = -7.44561800
+  target_reached_by_this_snapshot: False
+  missing_active_symbols: none
+
+COMPLEX #3: USELESSUSDT/PONSUSDT/AAVEUSDT | XPLUSDT/UNIUSDT/PENGUUSDT
+  target=3.33333333 | realized_pnl(state)=0.00000000 | layers=1 | close_pending=False | hedge_open=False
+  SYMBOL        SIDE   SIZE              UNREALIZED_PNL      AVG_PRICE         MARK_PRICE
+  USELESSUSDT   Buy    764.00000000      -6.99824000         0.13090000        0.12174000
+  PONSUSDT      Buy    414.00000000      -13.45500000        0.24110000        0.20860000
+  AAVEUSDT      Buy    0.73000000        -6.80360000         136.90000000      127.58000000
+  XPLUSDT       Sell   1380.00000000     7.24500000          0.07247000        0.06722000
+  UNIUSDT       Sell   13.80000000       1.44900000          7.19000000        7.08500000
+  PENGUUSDT     Sell   13680.00000000    4.24080000          0.00730400        0.00699400
+  unrealized_sum=-14.32204000
+  BOT/DASHBOARD FORMULA: realized + unrealized = -14.32204000
+  target_reached_by_this_snapshot: False
+  missing_active_symbols: none
+
+COMPLEX #4: AKEUSDT/NILUSDT/BLURUSDT | CAPUSDT/TIAUSDT/DOTUSDT
+  target=3.33333333 | realized_pnl(state)=0.00000000 | layers=4 | close_pending=False | hedge_open=False
+  SYMBOL        SIDE   SIZE              UNREALIZED_PNL      AVG_PRICE         MARK_PRICE
+  AKEUSDT       Buy    59000.00000000    -71.16640000        0.00673621        0.00553000
+  NILUSDT       Buy    5859.00000000     -22.18925000        0.06823721        0.06445000
+  BLURUSDT      Buy    50683.00000000    -26.86065400        0.00789197        0.00736200
+  CAPUSDT       Sell   5680.00000000     -2.48810000         0.07022195        0.07066000
+  TIAUSDT       Sell   850.50000000      20.55629000         0.47026965        0.44610000
+  DOTUSDT       Sell   419.00000000      8.62532000          0.95438549        0.93380000
+  unrealized_sum=-93.52279400
+  BOT/DASHBOARD FORMULA: realized + unrealized = -93.52279400
+  target_reached_by_this_snapshot: False
+  missing_active_symbols: none
+
+COMPLEX #5: GRASSUSDT/GRAMUSDT/ONDOUSDT | TAOUSDT/TRXUSDT/XMRUSDT
+  target=3.33333333 | realized_pnl(state)=0.00000000 | layers=1 | close_pending=False | hedge_open=False
+  SYMBOL        SIDE   SIZE              UNREALIZED_PNL      AVG_PRICE         MARK_PRICE
+  GRASSUSDT     Buy    170.00000000      -4.97080000         0.58700000        0.55776000
+  GRAMUSDT      Buy    81.40000000       -3.41880000         1.22800000        1.18600000
+  ONDOUSDT      Buy    247.00000000      -4.74240000         0.40430000        0.38510000
+  TAOUSDT       Sell   0.42600000        4.54116000          234.54000000      223.88000000
+  TRXUSDT       Sell   319.00000000      -1.30790000         0.31320000        0.31730000
+  XMRUSDT       Sell   0.16000000        -1.06560000         595.55000000      602.21000000
+  unrealized_sum=-10.96434000
+  BOT/DASHBOARD FORMULA: realized + unrealized = -10.96434000
+  target_reached_by_this_snapshot: False
+  missing_active_symbols: none
+
+COMPLEX #6: WLDUSDT/FARTCOINUSDT/QNTUSDT | ZAMAUSDT/PENDLEUSDT/ARBUSDT
+  target=3.33333333 | realized_pnl(state)=0.00000000 | layers=1 | close_pending=False | hedge_open=False
+  SYMBOL        SIDE   SIZE              UNREALIZED_PNL      AVG_PRICE         MARK_PRICE
+  WLDUSDT       Buy    255.80000000      -4.70672000         0.39090000        0.37250000
+  FARTCOINUSDT  Buy    826.00000000      -3.12228000         0.12096000        0.11718000
+  QNTUSDT       Buy    0.50000000        -1.69500000         198.63000000      195.24000000
+  ZAMAUSDT      Sell   1475.00000000     0.88500000          0.06777000        0.06717000
+  PENDLEUSDT    Sell   54.00000000       3.84480000          1.83430000        1.76310000
+  ARBUSDT       Sell   616.10000000      3.80749800          0.16231000        0.15613000
+  unrealized_sum=-0.98670200
+  BOT/DASHBOARD FORMULA: realized + unrealized = -0.98670200
+  target_reached_by_this_snapshot: False
+  missing_active_symbols: none
+
+Positions outside active state complexes: 0
+
+Diagnostic complete. This script did not place, cancel, or modify any order.
+Log saved to: C:\Users\PRO\PycharmProjects\syntech\diagnostic_sets_20261102_221326.log
