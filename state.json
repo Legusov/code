@@ -1,0 +1,758 @@
+{
+  "active": [
+    {
+      "complex": {
+        "leg1": [
+          "VVVUSDT",
+          "LINKUSDT",
+          "BCHUSDT"
+        ],
+        "leg2": [
+          "ZECUSDT",
+          "HYPEUSDT",
+          "INJUSDT"
+        ],
+        "d_max": 0.1784268154382309,
+        "cycles": 195,
+        "score": 2.5274698285408723
+      },
+      "leg1_long": true,
+      "entry_spread": -0.1128020614705495,
+      "layers": [
+        {
+          "qty": {
+            "VVVUSDT": 4.28,
+            "LINKUSDT": 8.4,
+            "BCHUSDT": 0.35,
+            "ZECUSDT": 0.07,
+            "HYPEUSDT": 1.13,
+            "INJUSDT": 13.7
+          },
+          "spread": -0.1128020614705495
+        }
+      ],
+      "hedge_open": false,
+      "hedge_spread": 0.0,
+      "hedge_qty": {},
+      "last_grid_level": 0.0,
+      "grid_level_index": 0,
+      "last_add_prices": {
+        "VVVUSDT": 20.609,
+        "LINKUSDT": 11.112,
+        "BCHUSDT": 276.41,
+        "ZECUSDT": 1129.58,
+        "HYPEUSDT": 83.764,
+        "INJUSDT": 7.032
+      },
+      "last_spread_snapshot": {
+        "VVVUSDT": 20.609,
+        "LINKUSDT": 11.112,
+        "BCHUSDT": 276.41,
+        "ZECUSDT": 1129.58,
+        "HYPEUSDT": 83.764,
+        "INJUSDT": 7.032
+      },
+      "selective_add_initialized": true,
+      "norm_refs": {
+        "VVVUSDT": 23.33,
+        "LINKUSDT": 11.808,
+        "BCHUSDT": 285.4,
+        "ZECUSDT": 1252.67,
+        "HYPEUSDT": 88.073,
+        "INJUSDT": 7.294
+      },
+      "target": 3.333333333333333,
+      "realized_pnl": 0.0,
+      "close_pending": false
+    },
+    {
+      "complex": {
+        "leg1": [
+          "LSKUSDT",
+          "PUMPFUNUSDT",
+          "SANDUSDT"
+        ],
+        "leg2": [
+          "RSRUSDT",
+          "ZROUSDT",
+          "NEARUSDT"
+        ],
+        "d_max": 0.38470577783879745,
+        "cycles": 138,
+        "score": 5.919646059440067
+      },
+      "leg1_long": true,
+      "entry_spread": -0.15662661904123287,
+      "layers": [
+        {
+          "qty": {
+            "LSKUSDT": 435.4,
+            "PUMPFUNUSDT": 23400.0,
+            "SANDUSDT": 2141.0,
+            "RSRUSDT": 65560.0,
+            "ZROUSDT": 54.8,
+            "NEARUSDT": 22.7
+          },
+          "spread": -0.15662661904123287
+        },
+        {
+          "qty": {
+            "PUMPFUNUSDT": 25100.0,
+            "NEARUSDT": 26.3
+          },
+          "spread": -0.03806791802265996,
+          "add_prices": {
+            "PUMPFUNUSDT": 0.0,
+            "NEARUSDT": 0.0
+          },
+          "pairs": [
+            [
+              "PUMPFUNUSDT",
+              "NEARUSDT"
+            ]
+          ],
+          "adverse_from_previous_pct": {
+            "PUMPFUNUSDT": -0.10085728693897285,
+            "NEARUSDT": 0.15839493136220242
+          },
+          "spread_adverse_contribution_pct": {
+            "PUMPFUNUSDT": -0.033619095646327445,
+            "NEARUSDT": 0.05279831045406821
+          },
+          "spread_snapshot": {
+            "LSKUSDT": 0.17562,
+            "PUMPFUNUSDT": 0.003968,
+            "SANDUSDT": 0.0438,
+            "RSRUSDT": 0.0014215,
+            "ZROUSDT": 1.7379,
+            "NEARUSDT": 3.793
+          },
+          "partial_failure": false
+        },
+        {
+          "qty": {
+            "SANDUSDT": 2280.0,
+            "ZROUSDT": 57.3,
+            "LSKUSDT": 569.0,
+            "RSRUSDT": 70290.0
+          },
+          "spread": -0.03840268790742307,
+          "add_prices": {
+            "SANDUSDT": 0.0,
+            "ZROUSDT": 0.0,
+            "LSKUSDT": 0.0,
+            "RSRUSDT": 0.0
+          },
+          "pairs": [
+            [
+              "SANDUSDT",
+              "ZROUSDT"
+            ],
+            [
+              "LSKUSDT",
+              "RSRUSDT"
+            ]
+          ],
+          "adverse_from_previous_pct": {
+            "SANDUSDT": -0.2514860539551874,
+            "ZROUSDT": 0.19540229885057875,
+            "LSKUSDT": -0.1710083794105881,
+            "RSRUSDT": 0.03515927149989919
+          },
+          "spread_adverse_contribution_pct": {
+            "SANDUSDT": -0.03805175038051889,
+            "ZROUSDT": 0.10549130176266501,
+            "LSKUSDT": -0.02087841172227674,
+            "RSRUSDT": 0.025794348692698144
+          },
+          "spread_snapshot": {
+            "LSKUSDT": 0.17573,
+            "PUMPFUNUSDT": 0.003973,
+            "SANDUSDT": 0.04385,
+            "RSRUSDT": 0.0014214,
+            "ZROUSDT": 1.7444,
+            "NEARUSDT": 3.794
+          },
+          "partial_failure": false
+        }
+      ],
+      "hedge_open": false,
+      "hedge_spread": 0.0,
+      "hedge_qty": {},
+      "last_grid_level": -10.0,
+      "grid_level_index": 2,
+      "last_add_prices": {
+        "LSKUSDT": 0.0,
+        "PUMPFUNUSDT": 0.0,
+        "SANDUSDT": 0.0,
+        "RSRUSDT": 0.0,
+        "ZROUSDT": 0.0,
+        "NEARUSDT": 0.0
+      },
+      "last_spread_snapshot": {
+        "LSKUSDT": 0.17573,
+        "PUMPFUNUSDT": 0.003973,
+        "SANDUSDT": 0.04385,
+        "RSRUSDT": 0.0014214,
+        "ZROUSDT": 1.7444,
+        "NEARUSDT": 3.794
+      },
+      "selective_add_initialized": true,
+      "norm_refs": {
+        "LSKUSDT": 0.22971,
+        "PUMPFUNUSDT": 0.004257,
+        "SANDUSDT": 0.04669,
+        "RSRUSDT": 0.0015253,
+        "ZROUSDT": 1.8225,
+        "NEARUSDT": 4.393
+      },
+      "target": 3.333333333333333,
+      "realized_pnl": 0.0,
+      "close_pending": false
+    },
+    {
+      "complex": {
+        "leg1": [
+          "USELESSUSDT",
+          "PONSUSDT",
+          "AAVEUSDT"
+        ],
+        "leg2": [
+          "XPLUSDT",
+          "UNIUSDT",
+          "PENGUUSDT"
+        ],
+        "d_max": 0.23583343608698515,
+        "cycles": 185,
+        "score": 2.583432626884737
+      },
+      "leg1_long": true,
+      "entry_spread": -0.1843811034415832,
+      "layers": [
+        {
+          "qty": {
+            "USELESSUSDT": 764.0,
+            "PONSUSDT": 414.0,
+            "AAVEUSDT": 0.73,
+            "XPLUSDT": 1380.0,
+            "UNIUSDT": 13.8,
+            "PENGUUSDT": 13680.0
+          },
+          "spread": -0.1843811034415832
+        },
+        {
+          "qty": {
+            "AAVEUSDT": 0.78,
+            "XPLUSDT": 1560.0
+          },
+          "spread": -0.04725102605443987,
+          "add_prices": {
+            "AAVEUSDT": 0.0,
+            "XPLUSDT": 0.0
+          },
+          "pairs": [
+            [
+              "AAVEUSDT",
+              "XPLUSDT"
+            ]
+          ],
+          "adverse_from_previous_pct": {
+            "AAVEUSDT": -0.03915733416868757,
+            "XPLUSDT": 0.14062499999998884
+          },
+          "spread_adverse_contribution_pct": {
+            "AAVEUSDT": -0.01305244472289413,
+            "XPLUSDT": 0.04687499999999437
+          },
+          "spread_snapshot": {
+            "USELESSUSDT": 0.12087,
+            "PONSUSDT": 0.195,
+            "AAVEUSDT": 127.73,
+            "XPLUSDT": 0.06411,
+            "UNIUSDT": 7.058,
+            "PENGUUSDT": 0.00687
+          },
+          "partial_failure": false
+        },
+        {
+          "qty": {
+            "AAVEUSDT": 0.78,
+            "UNIUSDT": 14.1
+          },
+          "spread": -0.046757523461314565,
+          "add_prices": {
+            "AAVEUSDT": 0.0,
+            "UNIUSDT": 0.0
+          },
+          "pairs": [
+            [
+              "AAVEUSDT",
+              "UNIUSDT"
+            ]
+          ],
+          "adverse_from_previous_pct": {
+            "AAVEUSDT": null,
+            "UNIUSDT": 0.1275510204081681
+          },
+          "spread_adverse_contribution_pct": {
+            "AAVEUSDT": -0.010438685769457537,
+            "UNIUSDT": 0.03305941248701316
+          },
+          "spread_snapshot": {
+            "USELESSUSDT": 0.12125,
+            "PONSUSDT": 0.1952,
+            "AAVEUSDT": 127.8,
+            "XPLUSDT": 0.06421,
+            "UNIUSDT": 7.065,
+            "PENGUUSDT": 0.006873
+          },
+          "partial_failure": false
+        }
+      ],
+      "hedge_open": false,
+      "hedge_spread": 0.0,
+      "hedge_qty": {},
+      "last_grid_level": -10.0,
+      "grid_level_index": 2,
+      "last_add_prices": {
+        "USELESSUSDT": 0.12062,
+        "PONSUSDT": 0.1946,
+        "AAVEUSDT": 0.0,
+        "XPLUSDT": 0.0,
+        "UNIUSDT": 0.0,
+        "PENGUUSDT": 0.006867
+      },
+      "last_spread_snapshot": {
+        "USELESSUSDT": 0.12125,
+        "PONSUSDT": 0.1952,
+        "AAVEUSDT": 127.8,
+        "XPLUSDT": 0.06421,
+        "UNIUSDT": 7.065,
+        "PENGUUSDT": 0.006873
+      },
+      "selective_add_initialized": true,
+      "norm_refs": {
+        "USELESSUSDT": 0.1308,
+        "PONSUSDT": 0.2413,
+        "AAVEUSDT": 136.83,
+        "XPLUSDT": 0.07241,
+        "UNIUSDT": 7.192,
+        "PENGUUSDT": 0.007303
+      },
+      "target": 3.333333333333333,
+      "realized_pnl": 0.0,
+      "close_pending": false
+    },
+    {
+      "complex": {
+        "leg1": [
+          "AKEUSDT",
+          "NILUSDT",
+          "BLURUSDT"
+        ],
+        "leg2": [
+          "CAPUSDT",
+          "TIAUSDT",
+          "DOTUSDT"
+        ],
+        "d_max": 0.48406533581156863,
+        "cycles": 190,
+        "score": 8.796113705515713
+      },
+      "leg1_long": true,
+      "entry_spread": -0.46103361271076004,
+      "layers": [
+        {
+          "qty": {
+            "AKEUSDT": 11000.0,
+            "NILUSDT": 1412.0,
+            "BLURUSDT": 12367.0,
+            "CAPUSDT": 1490.0,
+            "TIAUSDT": 208.5,
+            "DOTUSDT": 105.4
+          },
+          "spread": -0.46103361271076004
+        },
+        {
+          "qty": {
+            "AKEUSDT": 13600.0,
+            "NILUSDT": 1459.0,
+            "BLURUSDT": 12658.0,
+            "CAPUSDT": 1390.0,
+            "TIAUSDT": 212.2,
+            "DOTUSDT": 104.3
+          },
+          "spread": -0.10474958316411187
+        },
+        {
+          "qty": {
+            "AKEUSDT": 16000.0,
+            "NILUSDT": 1486.0,
+            "BLURUSDT": 12818.0,
+            "CAPUSDT": 1400.0,
+            "TIAUSDT": 213.5,
+            "DOTUSDT": 104.6
+          },
+          "spread": -0.14850267598441158
+        },
+        {
+          "qty": {
+            "AKEUSDT": 18400.0,
+            "NILUSDT": 1502.0,
+            "BLURUSDT": 12840.0,
+            "CAPUSDT": 1400.0,
+            "TIAUSDT": 216.3,
+            "DOTUSDT": 104.7
+          },
+          "spread": -0.17674351544648326
+        },
+        {
+          "qty": {
+            "AKEUSDT": 22500.0,
+            "NILUSDT": 1526.0,
+            "BLURUSDT": 13668.0,
+            "CAPUSDT": 1360.0,
+            "TIAUSDT": 228.1,
+            "DOTUSDT": 107.2
+          },
+          "spread": -0.22482681926241166
+        },
+        {
+          "qty": {
+            "BLURUSDT": 13574.0,
+            "DOTUSDT": 107.0,
+            "NILUSDT": 1552.0,
+            "TIAUSDT": 227.9,
+            "AKEUSDT": 22100.0,
+            "CAPUSDT": 1360.0
+          },
+          "spread": -0.22495265799199882,
+          "add_prices": {
+            "BLURUSDT": 0.0,
+            "DOTUSDT": 0.0,
+            "NILUSDT": 0.0,
+            "TIAUSDT": 0.0,
+            "AKEUSDT": 0.0,
+            "CAPUSDT": 0.0
+          },
+          "pairs": [
+            [
+              "BLURUSDT",
+              "DOTUSDT"
+            ],
+            [
+              "NILUSDT",
+              "TIAUSDT"
+            ],
+            [
+              "AKEUSDT",
+              "CAPUSDT"
+            ]
+          ],
+          "adverse_from_previous_pct": {
+            "BLURUSDT": -0.09510869565217475,
+            "DOTUSDT": 0.17154497694864865,
+            "NILUSDT": -0.03106554830691557,
+            "TIAUSDT": 0.06844626967829498,
+            "AKEUSDT": -0.04437541601953108,
+            "CAPUSDT": 0.06823144104804636
+          },
+          "spread_adverse_contribution_pct": {
+            "BLURUSDT": -0.031702898550722836,
+            "DOTUSDT": 0.05718165898288182,
+            "NILUSDT": -0.01035518276897296,
+            "TIAUSDT": 0.022815423226100567,
+            "AKEUSDT": -0.014791805339845846,
+            "CAPUSDT": 0.022743813682679637
+          },
+          "spread_snapshot": {
+            "AKEUSDT": 0.004504,
+            "NILUSDT": 0.06443,
+            "BLURUSDT": 0.007367,
+            "CAPUSDT": 0.07333,
+            "TIAUSDT": 0.4387,
+            "DOTUSDT": 0.935
+          },
+          "partial_failure": false
+        }
+      ],
+      "hedge_open": false,
+      "hedge_spread": 0.0,
+      "hedge_qty": {},
+      "last_grid_level": -80.0,
+      "grid_level_index": 5,
+      "last_add_prices": {
+        "AKEUSDT": 0.0,
+        "NILUSDT": 0.0,
+        "BLURUSDT": 0.0,
+        "CAPUSDT": 0.0,
+        "TIAUSDT": 0.0,
+        "DOTUSDT": 0.0
+      },
+      "last_spread_snapshot": {
+        "AKEUSDT": 0.004504,
+        "NILUSDT": 0.06443,
+        "BLURUSDT": 0.007367,
+        "CAPUSDT": 0.07333,
+        "TIAUSDT": 0.4387,
+        "DOTUSDT": 0.935
+      },
+      "selective_add_initialized": true,
+      "norm_refs": {
+        "AKEUSDT": 0.00903,
+        "NILUSDT": 0.07081,
+        "BLURUSDT": 0.008086,
+        "CAPUSDT": 0.06707,
+        "TIAUSDT": 0.4794,
+        "DOTUSDT": 0.9481
+      },
+      "target": 3.333333333333333,
+      "realized_pnl": 0.0,
+      "close_pending": false
+    },
+    {
+      "complex": {
+        "leg1": [
+          "GRASSUSDT",
+          "GRAMUSDT",
+          "ONDOUSDT"
+        ],
+        "leg2": [
+          "TAOUSDT",
+          "TRXUSDT",
+          "XMRUSDT"
+        ],
+        "d_max": 0.22286386851691575,
+        "cycles": 160,
+        "score": 2.9507082223120564
+      },
+      "leg1_long": true,
+      "entry_spread": -0.10904615437066345,
+      "layers": [
+        {
+          "qty": {
+            "GRASSUSDT": 170.0,
+            "GRAMUSDT": 81.4,
+            "ONDOUSDT": 247.0,
+            "TAOUSDT": 0.426,
+            "TRXUSDT": 319.0,
+            "XMRUSDT": 0.16
+          },
+          "spread": -0.10904615437066345
+        },
+        {
+          "qty": {
+            "ONDOUSDT": 261.0,
+            "TAOUSDT": 0.451,
+            "GRAMUSDT": 86.0,
+            "TRXUSDT": 310.0
+          },
+          "spread": -0.06153581697305943,
+          "add_prices": {
+            "ONDOUSDT": 0.0,
+            "TAOUSDT": 0.0,
+            "GRAMUSDT": 0.0,
+            "TRXUSDT": 0.0
+          },
+          "pairs": [
+            [
+              "ONDOUSDT",
+              "TAOUSDT"
+            ],
+            [
+              "GRAMUSDT",
+              "TRXUSDT"
+            ]
+          ],
+          "adverse_from_previous_pct": {
+            "ONDOUSDT": -0.07853403141360392,
+            "TAOUSDT": 0.15368620892284204,
+            "GRAMUSDT": 0.0,
+            "TRXUSDT": 0.062189054726361305
+          },
+          "spread_adverse_contribution_pct": {
+            "ONDOUSDT": -0.026178010471200608,
+            "TAOUSDT": 0.05122873630761434,
+            "GRAMUSDT": -0.0,
+            "TRXUSDT": 0.020729684908789753
+          },
+          "spread_snapshot": {
+            "GRASSUSDT": 0.5527,
+            "GRAMUSDT": 1.162,
+            "ONDOUSDT": 0.3824,
+            "TAOUSDT": 221.61,
+            "TRXUSDT": 0.3218,
+            "XMRUSDT": 623.1
+          },
+          "partial_failure": false
+        },
+        {
+          "qty": {
+            "GRAMUSDT": 86.3,
+            "XMRUSDT": 0.16
+          },
+          "spread": -0.0622041643922332,
+          "add_prices": {
+            "GRAMUSDT": 0.0,
+            "XMRUSDT": 0.0
+          },
+          "pairs": [
+            [
+              "GRAMUSDT",
+              "XMRUSDT"
+            ]
+          ],
+          "adverse_from_previous_pct": {
+            "GRAMUSDT": null,
+            "XMRUSDT": 0.0032106851602285206
+          },
+          "spread_adverse_contribution_pct": {
+            "GRAMUSDT": 0.11474469305794803,
+            "XMRUSDT": -0.008559353768788913
+          },
+          "spread_snapshot": {
+            "GRASSUSDT": 0.5538,
+            "GRAMUSDT": 1.158,
+            "ONDOUSDT": 0.3831,
+            "TAOUSDT": 222.02,
+            "TRXUSDT": 0.3221,
+            "XMRUSDT": 622.89
+          },
+          "partial_failure": false
+        }
+      ],
+      "hedge_open": false,
+      "hedge_spread": 0.0,
+      "hedge_qty": {},
+      "last_grid_level": -10.0,
+      "grid_level_index": 2,
+      "last_add_prices": {
+        "GRASSUSDT": 0.5502,
+        "GRAMUSDT": 0.0,
+        "ONDOUSDT": 0.0,
+        "TAOUSDT": 0.0,
+        "TRXUSDT": 0.0,
+        "XMRUSDT": 0.0
+      },
+      "last_spread_snapshot": {
+        "GRASSUSDT": 0.5538,
+        "GRAMUSDT": 1.158,
+        "ONDOUSDT": 0.3831,
+        "TAOUSDT": 222.02,
+        "TRXUSDT": 0.3221,
+        "XMRUSDT": 622.89
+      },
+      "selective_add_initialized": true,
+      "norm_refs": {
+        "GRASSUSDT": 0.587,
+        "GRAMUSDT": 1.228,
+        "ONDOUSDT": 0.4043,
+        "TAOUSDT": 234.54,
+        "TRXUSDT": 0.3133,
+        "XMRUSDT": 595.55
+      },
+      "target": 3.333333333333333,
+      "realized_pnl": 0.0,
+      "close_pending": false
+    },
+    {
+      "complex": {
+        "leg1": [
+          "WLDUSDT",
+          "FARTCOINUSDT",
+          "QNTUSDT"
+        ],
+        "leg2": [
+          "ZAMAUSDT",
+          "PENDLEUSDT",
+          "ARBUSDT"
+        ],
+        "d_max": 0.12016706970330415,
+        "cycles": 228,
+        "score": 3.297883599839369
+      },
+      "leg1_long": true,
+      "entry_spread": -0.09827665075655967,
+      "layers": [
+        {
+          "qty": {
+            "WLDUSDT": 255.8,
+            "FARTCOINUSDT": 826.0,
+            "QNTUSDT": 0.5,
+            "ZAMAUSDT": 1475.0,
+            "PENDLEUSDT": 54.0,
+            "ARBUSDT": 616.1
+          },
+          "spread": -0.09827665075655967
+        }
+      ],
+      "hedge_open": false,
+      "hedge_spread": 0.0,
+      "hedge_qty": {},
+      "last_grid_level": 0.0,
+      "grid_level_index": 0,
+      "last_add_prices": {
+        "WLDUSDT": 0.366,
+        "FARTCOINUSDT": 0.11538,
+        "QNTUSDT": 195.35,
+        "ZAMAUSDT": 0.06701,
+        "PENDLEUSDT": 1.733,
+        "ARBUSDT": 0.15383
+      },
+      "last_spread_snapshot": {
+        "WLDUSDT": 0.366,
+        "FARTCOINUSDT": 0.11538,
+        "QNTUSDT": 195.35,
+        "ZAMAUSDT": 0.06701,
+        "PENDLEUSDT": 1.733,
+        "ARBUSDT": 0.15383
+      },
+      "selective_add_initialized": true,
+      "norm_refs": {
+        "WLDUSDT": 0.3909,
+        "FARTCOINUSDT": 0.12098,
+        "QNTUSDT": 198.74,
+        "ZAMAUSDT": 0.06777,
+        "PENDLEUSDT": 1.8332,
+        "ARBUSDT": 0.16231
+      },
+      "target": 3.333333333333333,
+      "realized_pnl": 0.0,
+      "close_pending": false
+    }
+  ],
+  "reserve": [
+    {
+      "leg1": [
+        "JCTUSDT",
+        "QUSDT",
+        "PARTIUSDT"
+      ],
+      "leg2": [
+        "INITUSDT",
+        "MAGMAUSDT",
+        "1000PEPEUSDT"
+      ],
+      "d_max": 4.313712431158958,
+      "cycles": 76,
+      "avg_amplitude": 0.40666702396870436,
+      "score": 30.90669382162153
+    },
+    {
+      "leg1": [
+        "SOPHUSDT",
+        "STRKUSDT",
+        "AEROUSDT"
+      ],
+      "leg2": [
+        "WETUSDT",
+        "LITUSDT",
+        "OPUSDT"
+      ],
+      "d_max": 0.6781486208834018,
+      "cycles": 133,
+      "avg_amplitude": 0.0465469822915898,
+      "score": 6.1907486447814435
+    }
+  ]
+}
