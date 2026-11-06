@@ -1,0 +1,196 @@
+from api_config import api_t, chat
+
+
+def pin_message(api, chat_id, message_id, disable_notification=True):
+    try:
+        # Формируем payload с параметрами для pinChatMessage
+        payload = {
+            'chat_id': chat_id,
+            'message_id': int(message_id),
+            'disable_notification': disable_notification  # Подавляет уведомление о закрепе
+        }
+
+        response = requests.post(
+            f'https://api.telegram.org/bot{api}/pinChatMessage',
+            json=payload
+        )
+
+        if response.status_code == 200:
+            response_data = response.json()
+            if response_data.get('ok'):
+                print(f"Сообщение {message_id} успешно закреплено!")
+                return True
+
+        print(f"Ошибка при закреплении: {response.text}")
+        return False
+
+    except Exception as e:
+        print(f"Ошибка в pin_message: {e}")
+        return False
+
+def msg_tg_id(txt):
+    global api_t, chat
+    try:
+        out = requests.get(
+            f'https://api.telegram.org/bot{api_t}/sendMessage',
+            params={
+                'chat_id': f'{chat}',
+                'text': txt}
+        )
+        if out.status_code == 200:
+            result = out.json()
+            message_id = result['result']['message_id']
+
+            if message_id:
+                pin_message(api_t, chat, message_id)
+            print(f'msg_tg_id new: {message_id}')
+            return message_id
+    except Exception as e:
+        print(f"Ошибка в msg_tg_id: {e}")
+
+
+def send_or_update_photo():
+    """
+    Отправляет или обновляет фото в Telegram-канале.
+    Использует глобальные переменные api_t (токен бота) и chat (ID чата/канала).
+    При первом вызове отправляет новое фото и сохраняет message_id в файл msg_id.txt.
+    При последующих вызовах заменяет изображение в том же сообщении через editMessageMedia.
+    В случае ошибки обновления (например, сообщение удалено) удаляет сохранённый ID
+    и создаёт новое сообщение.
+    """
+    global api_t, chat
+
+    photo_path = 'live_graf.png'
+    storage_file = 'msg_id.txt'
+
+    # Проверяем, существует ли файл с сохранённым ID
+    msg_id = False
+    try:
+        if os.path.exists(storage_file):
+            with open(storage_file, 'r') as f:
+                msg_id = f.read().strip()
+    except:
+        pass
+
+    if msg_id:
+        # Пытаемся обновить существующее сообщение
+        url = f'https://api.telegram.org/bot{api_t}/editMessageMedia'
+        media = {
+            'type': 'photo',
+            'media': 'attach://photo'  # файл будет передан в поле 'photo'
+        }
+        try:
+            with open(photo_path, 'rb') as photo_file:
+                files = {
+                    'photo': (photo_path, photo_file, 'image/png')
+                }
+                data = {
+                    'chat_id': chat,
+                    'message_id': msg_id,
+                    'media': json.dumps(media)
+                }
+                response = requests.post(url, data=data, files=files)
+                response.raise_for_status()
+                # print("Фото успешно обновлено.")
+                return
+        except Exception as e:
+            pass
+            return
+            # print(f"Ошибка при обновлении фото: {e}")
+            # Если обновление не удалось, удаляем сохранённый ID
+            # и переходим к отправке нового сообщения
+            # os.remove(storage_file)
+
+    if not msg_id:
+        # Отправка нового фото (если ID нет или обновление провалилось)
+        url = f'https://api.telegram.org/bot{api_t}/sendPhoto'
+        try:
+            with open(photo_path, 'rb') as photo_file:
+                files = {
+                    'photo': (photo_path, photo_file, 'image/png')
+                }
+                data = {
+                    'chat_id': chat
+                }
+                response = requests.post(url, data=data, files=files)
+                response.raise_for_status()
+                result = response.json()
+                if result.get('ok'):
+                    message_id = result['result']['message_id']
+                    with open(storage_file, 'w') as f:
+                        f.write(str(message_id))
+                    print("Новое фото отправлено, ID сохранён.")
+                else:
+                    print("Ошибка отправки: ответ Telegram не содержит 'ok'.")
+        except Exception as e:
+            pass
+            # print(f"Ошибка при отправке фото: {e}")
+
+
+def send_tg(txt):
+    global api_t, chat
+    try:
+        requests.get(
+            f'https://api.telegram.org/bot{api_t}/sendMessage',
+            params={
+                'chat_id': f'{chat}',
+                'text': txt}
+        )
+    except Exception as e:
+        print(f"Ошибка в send_tg: {e}")
+
+
+def send_tg_crypta(txt):
+    global api_t
+    try:
+        requests.get(
+            f'https://api.telegram.org/bot{api_t}/sendMessage',
+            params={
+                'chat_id': '-1003280628832',
+                'message_thread_id': 41694,
+                'text': txt}
+        )
+    except Exception as e:
+        print(f"Ошибка в send_tg_crypta: {e}")
+
+
+def send_tg_update(txt):
+    global api_t, chat, id_update_mes
+    try:
+        if 'id_update_mes' not in globals() or id_update_mes is None:
+            return
+            # Пропускаем если ID сообщения еще не получен
+
+        # buttons = [
+        #     [{"text": "📊 Стоп", "callback_data": "button_1"}],
+        #     [{"text": "💰 Старт", "callback_data": "button_2"}],
+        #     [{"text": "🔴 Закрыть все позиции", "callback_data": "button_3"}]
+        # ]
+        params = {'chat_id': f'{chat}',
+                  'message_id': id_update_mes,
+                  'text': txt,
+                  'parse_mode': 'HTML'}
+
+        # reply_markup = {"inline_keyboard": buttons}
+        # params['reply_markup'] = json.dumps(reply_markup)
+
+        requests.get(
+            f'https://api.telegram.org/bot{api_t}/editMessageText',
+            params=params,
+            timeout=10
+        )
+    except Exception as e:
+        pass
+        # print(f"Ошибка в send_tg_update: {e}")
+
+    try:
+        requests.get(
+            f'https://api.telegram.org/bot{api_t}/editMessageText',
+            params={'chat_id': '-1003280628832',
+                    'message_thread_id': 41694,
+                    'message_id': 176002,
+                    'text': f'✅ Funding monitor REAL (live)\n{txt}'}
+        )
+    except Exception as e:
+        pass
+        # print(f"Ошибка в send_tg_update: {e}")
