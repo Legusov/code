@@ -4,7 +4,10 @@
 Streamlit-дашборд для мониторинга активных комплексов.
 """
 
+import asyncio
+import sys
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -23,11 +26,27 @@ except ImportError:
     st.stop()
 
 # ============================================================
+# ФИКС ОШИБКИ ASYNCIO НА WINDOWS (WinError 10054)
+# ============================================================
+def _ignore_asyncio_windows_errors(loop, context):
+    exception = context.get("exception")
+    if isinstance(exception, ConnectionResetError):
+        return
+    loop.default_exception_handler(context)
+
+if sys.platform == "win32":
+    try:
+        loop = asyncio.get_event_loop()
+        loop.set_exception_handler(_ignore_asyncio_windows_errors)
+    except Exception:
+        pass
+
+# ============================================================
 # КОНФИГ
 # ============================================================
 STATE_PATH = "state.json"
 DB_PATH = "bybit_1m.db"
-CHART_PERIOD_MIN = 60
+TRADES_DB = "trades.db"
 REFRESH_STATS_SEC = 10
 REFRESH_CHARTS_SEC = 30
 
@@ -37,7 +56,6 @@ st.set_page_config(
     page_icon="📊",
 )
 
-# Отключаем спиннер в правом верхнем углу
 st.markdown("<style>div[data-testid='stStatusWidget'] {display: none;}</style>", unsafe_allow_html=True)
 
 
@@ -47,7 +65,6 @@ st.markdown("<style>div[data-testid='stStatusWidget'] {display: none;}</style>",
 class DashboardData:
     def __init__(self):
         self.balance = {"equity": 0.0, "available": 0.0}
-        self.live = {}
         self.prices = {}
         self.last_update = 0.0
         self.lock = threading.Lock()
@@ -67,30 +84,11 @@ def get_data_fetcher():
                     "available": float(b.get("totalAvailableBalance", 0)),
                 }
 
-                live = {}
-                cursor = ""
-                seen = set()
-                page = 0
-                while True:
-                    params = {"category": "linear", "settleCoin": "USDT", "limit": 200}
-                    if cursor: params["cursor"] = cursor
-                    resp = session.get_positions(**params)
-                    res = resp.get("result", {})
-                    for p in res.get("list", []):
-                        if float(p.get("size", 0)) != 0:
-                            live[p["symbol"]] = p
-                    next_c = (res.get("nextPageCursor") or "").strip()
-                    if not next_c or next_c in seen or page >= 20: break
-                    seen.add(next_c)
-                    cursor = next_c
-                    page += 1
-
                 tickers = session.get_tickers(category="linear")["result"]["list"]
                 prices = {t["symbol"]: float(t["lastPrice"]) for t in tickers}
 
                 with data.lock:
                     data.balance = bal
-                    data.live = live
                     data.prices = prices
                     data.last_update = time.time()
             except Exception as e:
@@ -129,11 +127,6 @@ def get_month_refs_cached(symbols_tuple: tuple) -> Dict[str, float]:
     return refs
 
 
-@st.cache_resource
-def get_session() -> HTTP:
-    return HTTP(testnet=False, demo=True, api_key=API_KEY, api_secret=API_SECRET)
-
-
 @st.cache_data(ttl=2)
 def load_state() -> Dict:
     try:
@@ -144,10 +137,82 @@ def load_state() -> Dict:
 
 
 @st.cache_data(ttl=REFRESH_CHARTS_SEC)
-def load_chart_data_cached(leg1: tuple, leg2: tuple, norm_refs: dict, period_min: int) -> Tuple[pd.DataFrame, dict]:
+def get_trade_events(leg1: tuple, leg2: tuple, layers: List[Dict], d_max: float) -> List[Dict]:
+    if not os.path.exists(TRADES_DB) or not layers:
+        return []
+
+    complex_id = "|".join(list(leg1) + list(leg2))
+
+    try:
+        with sqlite3.connect(TRADES_DB, timeout=10) as conn:
+            df = pd.read_sql_query(
+                "SELECT ts_ms, event FROM trades WHERE complex_id=? ORDER BY ts_ms ASC",
+                conn, params=(complex_id,)
+            )
+    except Exception as e:
+        print(f"Ошибка чтения trades.db: {e}")
+        return []
+
+    if df.empty: return []
+
+    current_cycle = []
+    for _, row in df.iterrows():
+        if row['event'] == 'open':
+            current_cycle = [row]
+        elif row['event'] == 'add_layer' and current_cycle:
+            current_cycle.append(row)
+        elif row['event'] == 'close' and current_cycle:
+            current_cycle = []
+
+    if not current_cycle: return []
+
+    events = []
+    layer_idx = 0
+
+    for row in current_cycle:
+        if layer_idx >= len(layers): break
+        
+        layer = layers[layer_idx]
+        qty = layer.get("qty", {})
+        prices = layer.get("add_prices", {})
+        
+        # Используем сохраненный spread для точки на графике
+        sp_val = layer.get("spread", 0.0)
+        ratio_val = abs(sp_val) / d_max if d_max > 0 else 0.0
+        
+        parts = []
+        for sym, q in qty.items():
+            p = prices.get(sym, 0.0)
+            if p == 0: 
+                p = FETCHER.prices.get(sym, 1.0)
+            val = q * p
+            parts.append(f"{sym.replace('USDT','')}:${val:.0f}")
+        
+        full_label = f"<b>ratio={ratio_val:.2f}</b> | <b>spread={sp_val:+.4f}</b> | " + " | ".join(parts)
+        short_label = str(layer_idx + 1)
+        
+        events.append({
+            "ts_ms": int(row["ts_ms"]),
+            "type": row["event"],
+            "layer_idx": layer_idx,
+            "short_label": short_label,
+            "full_label": full_label,
+            "spread": sp_val
+        })
+        
+        layer_idx += 1
+
+    return events
+
+
+@st.cache_data(ttl=REFRESH_CHARTS_SEC)
+def load_multi_chart_data_cached(leg1: tuple, leg2: tuple, entry_month_refs_tuple: tuple, entry_spread: float, open_ts: int) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    entry_month_refs = dict(entry_month_refs_tuple)
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    expected_start_ms = now_ms - period_min * 60_000
+    month_ago = now_ms - 30 * 86400_000
     all_syms = list(leg1) + list(leg2)
+
+    current_refs = get_month_refs_cached(tuple(all_syms))
 
     def _query(sym, lo_ms, hi_ms):
         try:
@@ -160,115 +225,219 @@ def load_chart_data_cached(leg1: tuple, leg2: tuple, norm_refs: dict, period_min
         except Exception:
             return pd.DataFrame()
 
-    def _query_last_n(sym, n=500):
-        try:
-            with sqlite3.connect(DB_PATH) as conn:
-                return pd.read_sql_query(
-                    "SELECT timestamp, close FROM ohlcv WHERE symbol=? AND timeframe='1' "
-                    "ORDER BY timestamp DESC LIMIT ?",
-                    conn, params=(sym, n),
-                ).sort_values("timestamp").reset_index(drop=True)
-        except Exception:
-            return pd.DataFrame()
-
     frames = {}
-    syms_missing = []
     for sym in all_syms:
-        df = _query(sym, expected_start_ms, now_ms)
+        df = _query(sym, month_ago, now_ms)
         if df.empty:
-            syms_missing.append(sym)
             continue
-        ref = norm_refs.get(sym) or float(df["close"].iloc[0])
-        if ref <= 0:
-            ref = float(df["close"].iloc[0])
-        df["norm"] = df["close"] / ref
-        frames[sym] = df.set_index("timestamp")["norm"]
-
-    effective_period = period_min
+        frames[sym] = df.set_index("timestamp")["close"]
 
     if len(frames) < len(all_syms):
-        lo2 = now_ms - period_min * 4 * 60_000
-        effective_period = period_min * 4
-        for sym in syms_missing[:]:
-            df = _query(sym, lo2, now_ms)
-            if df.empty: continue
-            ref = norm_refs.get(sym) or float(df["close"].iloc[0])
-            if ref <= 0: ref = float(df["close"].iloc[0])
-            df["norm"] = df["close"] / ref
-            frames[sym] = df.set_index("timestamp")["norm"]
-            syms_missing.remove(sym)
-
-    if syms_missing:
-        for sym in syms_missing[:]:
-            df = _query_last_n(sym, 500)
-            if df.empty: continue
-            ref = norm_refs.get(sym) or float(df["close"].iloc[0])
-            if ref <= 0: ref = float(df["close"].iloc[0])
-            df["norm"] = df["close"] / ref
-            frames[sym] = df.set_index("timestamp")["norm"]
-            syms_missing.remove(sym)
-
-    meta = {
-        "empty": not frames,
-        "data_start_ts": None,
-        "data_end_ts": None,
-        "expected_start_ts": expected_start_ms,
-        "now_ts": now_ms,
-        "syms_missing": syms_missing,
-        "effective_period_min": effective_period,
-    }
-
-    if not frames:
-        return pd.DataFrame(), meta
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     pivot = pd.DataFrame(frames).sort_index().ffill()
+
     if pivot.empty:
-        return pd.DataFrame(), meta
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    meta["data_start_ts"] = int(pivot.index[0])
-    meta["data_end_ts"] = int(pivot.index[-1])
+    def _process(slice_df, resample_rule):
+        if slice_df.empty: return pd.DataFrame()
+        
+        valid_df = slice_df.dropna()
+        if valid_df.empty: return pd.DataFrame()
 
-    leg1_cols = [c for c in leg1 if c in pivot.columns]
-    leg2_cols = [c for c in leg2 if c in pivot.columns]
-    if not leg1_cols or not leg2_cols:
-        meta["empty"] = True
-        return pd.DataFrame(), meta
+        # Нормализация (сначала entry_month_refs, если нет - current_refs)
+        for col in valid_df.columns:
+            ref = entry_month_refs.get(col)
+            if not ref or ref <= 0:
+                ref = current_refs.get(col)
+            if not ref or ref <= 0:
+                ref = valid_df[col].iloc[0]
+            valid_df[col] = valid_df[col] / ref
 
-    out = pd.DataFrame(index=pivot.index)
-    out["leg1"] = pivot[leg1_cols].mean(axis=1)
-    out["leg2"] = pivot[leg2_cols].mean(axis=1)
-    out["spread"] = out["leg1"] - out["leg2"]
-    out = out.dropna()
+        leg1_cols = [c for c in leg1 if c in valid_df.columns]
+        leg2_cols = [c for c in leg2 if c in valid_df.columns]
 
-    if out.empty:
-        meta["empty"] = True
-    return out, meta
+        leg1_raw = valid_df[leg1_cols].mean(axis=1)
+        leg2_raw = valid_df[leg2_cols].mean(axis=1)
+        spread_raw = leg1_raw - leg2_raw
+
+        out = pd.DataFrame(index=valid_df.index)
+        out["leg1"] = leg1_raw
+        out["leg2"] = leg2_raw
+        out["spread"] = spread_raw
+
+        # Сначала делаем ресемплинг (усреднение)
+        if resample_rule:
+            out.index = pd.to_datetime(out.index, unit="ms", utc=True)
+            out = out.resample(resample_rule).mean().dropna()
+        else:
+            out.index = pd.to_datetime(out.index, unit="ms", utc=True)
+
+        # ★ МАТЕМАТИЧЕСКИЙ СДВИГ (OFFSET) ПРИМЕНЯЕМ ПОСЛЕ РЕСЕМПЛИНГА
+        if not out.empty:
+            open_dt = pd.to_datetime(open_ts, unit="ms", utc=True)
+            idx = out.index.get_indexer([open_dt], method='nearest')[0]
+            
+            if idx != -1:
+                s_plot = out["spread"].iloc[idx]
+                offset = entry_spread - s_plot
+                
+                out["leg1"] = out["leg1"] + offset / 2.0
+                out["leg2"] = out["leg2"] - offset / 2.0
+                out["spread"] = out["spread"] + offset
+
+        return out
+
+    df_month = _process(pivot, '1h')
+    day_ago = now_ms - 24 * 3600_000
+    df_day = _process(pivot[pivot.index >= day_ago], '5min')
+    hour_ago = now_ms - 3600_000
+    df_hour = _process(pivot[pivot.index >= hour_ago], None)
+
+    return df_month, df_day, df_hour
+
+
+def plot_chart(df: pd.DataFrame, title: str, chart_key: str, events: List[Dict]):
+    if df.empty: return
+    
+    ts = df.index
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(x=ts, y=df["leg1"], name="leg1", line=dict(color="#1f77b4", width=1.6)))
+    fig.add_trace(go.Scatter(x=ts, y=df["leg2"], name="leg2", line=dict(color="#ff7f0e", width=1.6)))
+    fig.add_trace(go.Scatter(x=ts, y=df["spread"], name="spread", line=dict(color="#2ca02c", width=1.6, dash="dot"), yaxis="y2"))
+
+    df_min_ts = ts.min()
+    df_max_ts = ts.max()
+    
+    visible_events = []
+    if events:
+        for ev in events:
+            ev_ts = pd.to_datetime(ev["ts_ms"], unit="ms", utc=True)
+            if df_min_ts <= ev_ts <= df_max_ts:
+                visible_events.append(ev)
+                is_open = ev["type"] == "open"
+                color = "#00cc96" if is_open else "#ff7f0e"
+                
+                fig.add_vline(
+                    x=ev_ts,
+                    line_width=1.5,
+                    line_dash="dash",
+                    line_color=color,
+                    layer="above",
+                    annotation_text=f"<b>{ev['short_label']}</b>",
+                    annotation_position="top",
+                    annotation_font=dict(size=12, color="white"),
+                    annotation_bgcolor=color,
+                    annotation_borderpad=4
+                )
+                
+                fig.add_trace(go.Scatter(
+                    x=[ev_ts], y=[ev["spread"]],
+                    mode="markers",
+                    name=f"{ev['short_label']} ({'Вход' if is_open else 'Добор'})",
+                    marker=dict(size=12, color=color, symbol="circle", line=dict(color="white", width=1.5)),
+                    showlegend=False,
+                    yaxis="y2",
+                    hovertemplate=(
+                        f"<b>{ev['short_label']} ({'Вход' if is_open else 'Добор'})</b><br>"
+                        f"Spread: {ev['spread']:+.4f}<br>"
+                        f"{ev['full_label']}<extra></extra>"
+                    )
+                ))
+
+    date_range = f"{df_min_ts.strftime('%d.%m %H:%M')} - {df_max_ts.strftime('%d.%m %H:%M')}"
+    
+    fig.update_layout(
+        title=f"{title} (Данные: {date_range})",
+        height=350, 
+        margin=dict(l=10, r=10, t=40, b=10),
+        hovermode="x unified",
+        yaxis=dict(title="leg (norm)", gridcolor="#eee"),
+        yaxis2=dict(title="spread", overlaying="y", side="right", showgrid=False, zeroline=True, zerolinecolor="#aaa"),
+        legend=dict(orientation="h", y=1.1, x=0),
+        plot_bgcolor="#fafafa",
+    )
+    fig.add_hline(y=0, line_dash="dash", line_color="#888", yref="y2")
+    
+    st.plotly_chart(fig, width="stretch", key=chart_key)
+    
+    if visible_events:
+        legend_html = "<div style='background-color: #f8f9fa; padding: 10px; border-radius: 5px; border: 1px solid #e9ecef; font-family: monospace; font-size: 13px;'>"
+        for ev in visible_events:
+            is_open = ev["type"] == "open"
+            color = "#00cc96" if is_open else "#ff7f0e"
+            type_str = "Вход" if is_open else "Добор"
+            legend_html += f"<span style='color:{color}; font-weight:bold;'>■ {ev['short_label']} ({type_str})</span>: {ev['full_label']}<br>"
+        legend_html += "</div>"
+        st.markdown(legend_html, unsafe_allow_html=True)
 
 
 # ============================================================
-# РАСЧЁТЫ
+# МАТЕМАТИЧЕСКИЙ РАСЧЕТ PNL
 # ============================================================
-def complex_gross_pnl(cs: Dict, live: Dict[str, Dict]) -> float:
-    pnl = cs.get("realized_pnl", 0.0)
-    for sym in list(cs["complex"]["leg1"]) + list(cs["complex"]["leg2"]):
-        if sym in live:
-            pnl += float(live[sym].get("unrealisedPnl", 0))
+def complex_gross_pnl(cs: Dict, prices: Dict[str, float]) -> float:
+    pnl = float(cs.get("realized_pnl", 0.0))
+    leg1_long = cs.get("leg1_long", True)
+    
+    for sym in cs["complex"]["leg1"]:
+        current = prices.get(sym, 0.0)
+        if current <= 0: continue
+        
+        total_qty = 0.0
+        total_value = 0.0
+        for layer in cs.get("layers", []):
+            qty = layer.get("qty", {}).get(sym, 0.0)
+            entry = layer.get("add_prices", {}).get(sym, 0.0)
+            if qty > 0 and entry > 0:
+                total_qty += qty
+                total_value += qty * entry
+                
+        if total_qty <= 0: continue
+        avg_entry = total_value / total_qty
+        
+        if leg1_long:
+            pnl += total_qty * (current - avg_entry)
+        else:
+            pnl += total_qty * (avg_entry - current)
+            
+    for sym in cs["complex"]["leg2"]:
+        current = prices.get(sym, 0.0)
+        if current <= 0: continue
+        
+        total_qty = 0.0
+        total_value = 0.0
+        for layer in cs.get("layers", []):
+            qty = layer.get("qty", {}).get(sym, 0.0)
+            entry = layer.get("add_prices", {}).get(sym, 0.0)
+            if qty > 0 and entry > 0:
+                total_qty += qty
+                total_value += qty * entry
+                
+        if total_qty <= 0: continue
+        avg_entry = total_value / total_qty
+        
+        if leg1_long:
+            pnl += total_qty * (avg_entry - current)
+        else:
+            pnl += total_qty * (current - avg_entry)
+            
     return pnl
 
 
-def complex_net_pnl(cs: Dict, live: Dict[str, Dict], prices: Dict[str, float]) -> float:
-    gross = complex_gross_pnl(cs, live)
+def complex_net_pnl(cs: Dict, prices: Dict[str, float], taker_rate: float) -> float:
+    gross = complex_gross_pnl(cs, prices)
     fees_paid = float(cs.get("fees_paid", 0.0))
-    exit_cost_rate = 0.00055 + 0.0010
-
+    exit_cost_rate = taker_rate + 0.0010
+    
     exit_cost_est = 0.0
-    for sym in list(cs["complex"]["leg1"]) + list(cs["complex"]["leg2"]):
-        if sym in live:
-            p = live[sym]
-            size = abs(float(p.get("size", 0)))
-            price = float(p.get("markPrice", 0) or prices.get(sym, 0) or 0)
-            if size > 0 and price > 0:
-                exit_cost_est += size * price * exit_cost_rate
+    for layer in cs.get("layers", []):
+        for sym, qty in layer.get("qty", {}).items():
+            p = prices.get(sym, 0.0)
+            if qty > 0 and p > 0:
+                exit_cost_est += qty * p * exit_cost_rate
+                
     return gross - fees_paid - exit_cost_est
 
 
@@ -287,7 +456,7 @@ def complex_spread_now(cs: Dict, prices: Dict[str, float]) -> float:
 
 
 # ============================================================
-# HTML ТАБЛИЦЫ (Без отступов, чтобы Markdown не ломал)
+# HTML ТАБЛИЦЫ
 # ============================================================
 def generate_active_html_table(df: pd.DataFrame) -> str:
     css = "<style>.custom-table{width:100%;border-collapse:collapse;font-family:'Source Sans Pro',sans-serif;font-size:14px;}.custom-table th{padding:8px 12px;text-align:left;border-bottom:1px solid rgba(128,128,128,0.2);font-weight:600;}.custom-table td{padding:8px 12px;border-bottom:1px solid rgba(128,128,128,0.2);vertical-align:middle;}.pnl-pos{color:#21c354;font-weight:600;}.pnl-neg{color:#ff4b4b;font-weight:600;}.progress-wrapper{display:flex;align-items:center;gap:10px;min-width:130px;}.progress-track{flex-grow:1;height:8px;background-color:rgba(128,128,128,0.2);border-radius:4px;position:relative;}.progress-fill-pos{position:absolute;left:50%;height:100%;background-color:#21c354;border-radius:0 4px 4px 0;}.progress-fill-neg{position:absolute;right:50%;height:100%;background-color:#ff4b4b;border-radius:4px 0 0 4px;}.progress-text{font-size:12px;min-width:55px;text-align:right;}</style>"
@@ -331,7 +500,7 @@ def generate_reserve_html_table(reserve: List[Dict]) -> str:
 
 
 # ============================================================
-# UI: СТАТИСТИКА (10 сек)
+# UI: СТАТИСТИКА
 # ============================================================
 @st.fragment(run_every=REFRESH_STATS_SEC)
 def render_stats():
@@ -341,32 +510,25 @@ def render_stats():
 
     with FETCHER.lock:
         balance = FETCHER.balance
-        live = FETCHER.live
         prices = FETCHER.prices
         last_update = FETCHER.last_update
 
     update_time = datetime.fromtimestamp(last_update).strftime('%H:%M:%S') if last_update > 0 else "Ожидание..."
-    st.caption(f"Открытых позиций: {len(live)} · Обновлено: {update_time}")
+    st.caption(f"Текущие цены обновлены: {update_time}")
 
-    total_gross = sum(complex_gross_pnl(cs, live) for cs in active)
-    total_pnl = sum(complex_net_pnl(cs, live, prices) for cs in active)
-
-    total_target = sum(cs.get("target", 0) for cs in active)
+    taker_rate = 0.00055
+    total_gross = sum(complex_gross_pnl(cs, prices) for cs in active)
+    total_pnl = sum(complex_net_pnl(cs, prices, taker_rate) for cs in active)
 
     total_realized = sum(cs.get("realized_pnl", 0) for cs in active)
     total_unrealized = total_gross - total_realized
-
-    progress_avg = 0.0
-    if active:
-        progs = [min(complex_net_pnl(cs, live, prices) / cs.get("target", 1) * 100, 999) for cs in active]
-        progress_avg = sum(progs) / len(progs) if progs else 0.0
 
     color_total = "#21c354" if total_pnl >= 0 else "#ff4b4b"
     color_gross = "#21c354" if total_gross >= 0 else "#ff4b4b"
     color_unrl = "#21c354" if total_unrealized >= 0 else "#ff4b4b"
     color_equity = "#21c354" if balance['equity'] >= 2000 else "#ff4b4b"
 
-    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
     kpi1.markdown(
         f'<div style="font-size: 14px; color: #31333f; margin-bottom: 4px;">💰 Equity</div><div style="font-size: 36px; font-weight: 600; color: {color_equity}; line-height: 1.2;">${balance["equity"]:.2f}</div><div style="font-size: 14px; color: rgba(49, 51, 63, 0.6);">${balance["equity"] - 2000:+.2f} от старта</div>',
@@ -376,9 +538,8 @@ def render_stats():
         f'<div style="font-size: 14px; color: #31333f; margin-bottom: 4px;">📈 Net PnL</div><div style="font-size: 36px; font-weight: 600; color: {color_total}; line-height: 1.2;">${total_pnl:.2f}</div><div style="font-size: 14px; color: rgba(49, 51, 63, 0.6);">gross <span style="color: {color_gross}; font-weight: 600;">{total_gross:+.2f}</span> / unrl <span style="color: {color_unrl}; font-weight: 600;">{total_unrealized:+.2f}</span></div>',
         unsafe_allow_html=True)
 
-    kpi3.metric("🎯 Target sum", f"${total_target + 96:.2f}", delta=f"{progress_avg:.1f}% avg progress")
-    kpi4.metric("🟢 Активных", len(active), delta=f"{len(reserve)} в резерве")
-    kpi5.metric("💵 Свободно", f"${balance['available']:.2f}")
+    kpi3.metric("🟢 Активных", len(active), delta=f"{len(reserve)} в резерве")
+    kpi4.metric("💵 Свободно", f"${balance['available']:.2f}")
 
     st.divider()
     st.subheader("Активные комплексы")
@@ -391,8 +552,8 @@ def render_stats():
     else:
         rows = []
         for i, cs in enumerate(active, 1):
-            pnl_net = complex_net_pnl(cs, live, prices)
-            pnl_gross = complex_gross_pnl(cs, live)
+            pnl_net = complex_net_pnl(cs, prices, taker_rate)
+            pnl_gross = complex_gross_pnl(cs, prices)
             target = cs.get("target", 0)
             progress = max(-100.0, min(100.0, (pnl_net / target * 100) if target > 0 else 0))
 
@@ -426,7 +587,7 @@ def render_stats():
 
 
 # ============================================================
-# UI: ГРАФИКИ (30 сек)
+# UI: ГРАФИКИ
 # ============================================================
 @st.fragment(run_every=REFRESH_CHARTS_SEC)
 def render_charts():
@@ -437,19 +598,20 @@ def render_charts():
         return
 
     with FETCHER.lock:
-        live = FETCHER.live
         prices = FETCHER.prices
 
     st.divider()
-    st.subheader(f"Кривые нормализованных цен · последние {CHART_PERIOD_MIN} мин")
+    st.subheader("Графики нормализованных цен")
+    
+    taker_rate = 0.00055
 
     for i, cs in enumerate(active, 1):
         leg1 = tuple(cs["complex"]["leg1"])
         leg2 = tuple(cs["complex"]["leg2"])
         title = f"#{i} · {' / '.join(leg1)} ⟷ {' / '.join(leg2)}"
 
-        pnl_net = complex_net_pnl(cs, live, prices)
-        pnl_gross = complex_gross_pnl(cs, live)
+        pnl_net = complex_net_pnl(cs, prices, taker_rate)
+        pnl_gross = complex_gross_pnl(cs, prices)
         target = cs.get("target", 0)
 
         col_title, col_toggle = st.columns([4, 1])
@@ -459,45 +621,52 @@ def render_charts():
             show_chart = st.toggle("Показать график", key=f"tg_{i}")
 
         if show_chart:
-            st.markdown(f"Net PnL: **${pnl_net:.2f}** | Gross PnL: **${pnl_gross:.2f}** | Target: **${target:.2f}**")
+            st.markdown(
+                f"<div style='font-size: 16px; margin-bottom: 10px;'>"
+                f"Net PnL: <b>${pnl_net:.2f}</b> | "
+                f"Gross PnL: <b>${pnl_gross:.2f}</b> | "
+                f"Target: <b>${target:.2f}</b>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
 
-            df_chart, meta = load_chart_data_cached(leg1, leg2, cs.get("norm_refs", {}), CHART_PERIOD_MIN)
+            entry_month_refs = cs.get("entry_month_refs", {})
+            entry_month_refs_tuple = tuple(entry_month_refs.items())
+            entry_spread_val = float(cs.get("entry_spread", 0.0))
+            
+            d_max_val = float(cs.get("complex", {}).get("d_max", 0.0))
+            events = get_trade_events(leg1, leg2, cs.get("layers", []), d_max_val)
+            
+            # ★ Передаем время входа для точного сдвига графика
+            open_ts = events[0]["ts_ms"] if events else int(time.time() * 1000)
 
-            if meta["data_end_ts"]:
-                lag_min = (meta["now_ts"] - meta["data_end_ts"]) / 60_000
-                dt_end = datetime.fromtimestamp(meta["data_end_ts"] / 1000, tz=timezone.utc).strftime(
-                    "%Y-%m-%d %H:%M UTC")
-                dt_start = datetime.fromtimestamp(meta["data_start_ts"] / 1000, tz=timezone.utc).strftime(
-                    "%Y-%m-%d %H:%M UTC")
-                st.caption(
-                    f"Данные: **{dt_start}** → **{dt_end}**  ·  точек: {len(df_chart)}  ·  свежесть: **{lag_min:.0f} мин**")
+            df_month, df_day, df_hour = load_multi_chart_data_cached(
+                leg1, leg2, entry_month_refs_tuple, entry_spread_val, open_ts
+            )
 
-            if df_chart.empty:
-                st.info(f"Нет общих точек в окне {meta['effective_period_min']} мин.")
-            else:
-                ts = pd.to_datetime(df_chart.index, unit="ms", utc=True)
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=ts, y=df_chart["leg1"], name="leg1", line=dict(color="#1f77b4", width=1.6)))
-                fig.add_trace(go.Scatter(x=ts, y=df_chart["leg2"], name="leg2", line=dict(color="#ff7f0e", width=1.6)))
-                fig.add_trace(go.Scatter(x=ts, y=df_chart["spread"], name="spread",
-                                         line=dict(color="#2ca02c", width=1.6, dash="dot"), yaxis="y2"))
+            tab_m, tab_d, tab_h = st.tabs(["📅 Месяц (1ч)", "☀️ День (5м)", "⏱️ Час (1м)"])
 
-                fig.update_layout(
-                    height=320,
-                    margin=dict(l=10, r=10, t=30, b=10),
-                    hovermode="x unified",
-                    yaxis=dict(title="leg (norm)", gridcolor="#eee"),
-                    yaxis2=dict(title="spread", overlaying="y", side="right", showgrid=False, zeroline=True,
-                                zerolinecolor="#aaa"),
-                    legend=dict(orientation="h", y=1.1, x=0),
-                    plot_bgcolor="#fafafa",
-                )
-                fig.add_hline(y=0, line_dash="dash", line_color="#888", yref="y2")
+            with tab_m:
+                if df_month.empty:
+                    st.info("Нет данных за месяц")
+                else:
+                    plot_chart(df_month, f"Месяц (реальный спред, 1ч)", f"chart_{i}_month", events)
 
-                st.plotly_chart(fig, width="stretch", key=f"chart_{i}")
+            with tab_d:
+                if df_day.empty:
+                    st.info("Нет данных за день")
+                else:
+                    plot_chart(df_day, f"День (реальный спред, 5м)", f"chart_{i}_day", events)
 
+            with tab_h:
+                if df_hour.empty:
+                    st.info("Нет данных за час")
+                else:
+                    plot_chart(df_hour, f"Часы (реальный спред, 1м)", f"chart_{i}_hour", events)
+
+            if not df_hour.empty:
                 col1, col2, col3, col4 = st.columns(4)
-                cur_S = df_chart["spread"].iloc[-1]
+                cur_S = df_hour["spread"].iloc[-1]
                 entry_S = cs.get("entry_spread", 0)
                 col1.metric("Текущий спред", f"{cur_S:+.4f}", delta=f"{(cur_S - entry_S):+.4f} от входа")
                 col2.metric("Слоёв в позиции", len(cs.get("layers", [])))
