@@ -18,6 +18,7 @@ import sqlite3
 import logging
 import threading
 import trade_log
+import requests
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -26,6 +27,7 @@ except Exception:
     pass
 
 from datetime import datetime, timezone
+from decimal import Decimal, ROUND_DOWN, InvalidOperation
 from itertools import combinations, permutations
 from typing import List, Dict, Optional, Tuple
 
@@ -53,6 +55,13 @@ if not API_KEY or "PUT_" in API_KEY:
 if not API_SECRET or "PUT_" in API_SECRET:
     sys.exit("API_SECRET пустой или содержит заглушку — проверьте key.py")
 
+try:
+    from api_config import api_t as TELEGRAM_TOKEN
+except ImportError:
+    TELEGRAM_TOKEN = None
+# Чат, указанный владельцем проекта.
+TELEGRAM_CHAT_ID = "-1003796007365"
+
 # ============================================================
 # КОНФИГУРАЦИЯ
 # ============================================================
@@ -69,6 +78,10 @@ CONFIG = {
     "annual_stability_enabled": True,
     "annual_history_days": 365,
     "annual_interval": "D",
+    # Для дашборда: почасовая история за максимально доступный год.
+    "dashboard_hourly_history_enabled": True,
+    "dashboard_hourly_history_days": 365,
+    "dashboard_hourly_request_pause": 0.12,
     "annual_min_history_days": 350,
     "annual_min_coverage": 0.95,
     "annual_windows_days": [30, 90, 180],
@@ -151,11 +164,20 @@ CONFIG = {
     "hedge_buffer_pct": 0.05,
     "hedge_close_reversal": 0.10,
     "monitor_interval_sec": 10,
+    "telegram_live_enabled": True,
+    "telegram_update_interval_sec": 10,
+    "telegram_text_id_path": "msg.txt",
+    "telegram_photo_id_path": "msg_id.txt",
+    "telegram_text_setup_path": "msg_initialized.once",
+    "telegram_photo_setup_path": "photo_initialized.once",
+    "telegram_equity_chart_path": "live_graf.png",
+    "telegram_equity_chart_hours": 24,
 
     "close_parallel_workers": 8,
     "close_verify_wait_sec": 0.5,
     "close_verify_retries": 2,
     "close_slippage_log_async": True,
+    "close_use_exchange_position_size": True,
 }
 
 # ============================================================
@@ -324,6 +346,81 @@ def check_and_load_history(session, symbols, interval=None, history_days=None,
         log.info("Догружено всего %s/%sm свечей: %d", history_days, interval, total_loaded)
     else:
         log.info("История %s/%sm актуальна, догрузка не нужна.", history_days, interval)
+
+
+def check_and_load_hourly_history(session, symbols: List[str], history_days=None,
+                                  request_pause=None):
+    """Догружает доступную часовую историю (до N дней) в ohlcv/timeframe='60'.
+
+    Существующая таблица ohlcv не меняется: ключ содержит timeframe, поэтому
+    часовые бары сосуществуют с минутными ('1') и дневными ('D'). Для каждого
+    символа докачиваются недостающий префикс до 365 дней и хвост до последнего
+    закрытого часа. Если инструмент появился позже, сохраняется вся история,
+    которую Bybit отдаёт в запрошенном интервале.
+    """
+    days = max(1, int(history_days or CONFIG.get("dashboard_hourly_history_days", 365)))
+    interval = "60"
+    hour_ms = 60 * 60_000
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    # Конец последнего полностью закрытого часа, включительно.
+    end_exclusive_ms = (now_ms // hour_ms) * hour_ms
+    last_closed_start = end_exclusive_ms - hour_ms
+    end_ms = last_closed_start
+    start_target = end_exclusive_ms - days * 24 * hour_ms
+    pause = float(CONFIG.get("dashboard_hourly_request_pause", 0.12)
+                  if request_pause is None else request_pause)
+    total_loaded = 0
+    symbols = list(dict.fromkeys(str(sym) for sym in symbols if sym))
+
+    for i, sym in enumerate(symbols):
+        if i:
+            time.sleep(0.20)
+        with sqlite3.connect(CONFIG["db_path"]) as conn:
+            count, min_ts, max_ts = conn.execute(
+                "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM ohlcv "
+                "WHERE symbol=? AND timeframe=?", (sym, interval)
+            ).fetchone()
+
+        ranges = []
+        if min_ts is None:
+            ranges.append((start_target, end_ms))
+        else:
+            min_ts, max_ts = int(min_ts), int(max_ts)
+            # If the latest closed hour is already present, do not call Bybit.
+            # This removes repeated duplicate one-candle downloads on each poll.
+            if max_ts >= last_closed_start:
+                continue
+            if min_ts > start_target:
+                ranges.append((start_target, min_ts - 1))
+            ranges.append((max(start_target, max_ts + hour_ms), end_ms))
+
+        symbol_loaded = 0
+        for range_start, range_end in ranges:
+            if range_start > range_end:
+                continue
+            candles = fetch_kline_paginated(
+                session, sym, range_start, range_end,
+                category=CONFIG["category"], interval=interval,
+                request_pause=pause,
+            )
+            if candles:
+                # Не сохранять текущий незакрытый бар, даже если API его вернул.
+                candles = [c for c in candles if int(c[0]) <= last_closed_start]
+                if candles:
+                    upsert_candles(sym, candles, timeframe=interval)
+                    symbol_loaded += len(candles)
+        total_loaded += symbol_loaded
+        if symbol_loaded:
+            log.info("  часовая история %s/60: +%d свечей (было %d)",
+                     sym, symbol_loaded, count)
+        else:
+            log.debug("  часовая история %s/60 уже актуальна (строк %d)", sym, count)
+
+    if total_loaded:
+        log.info("Почасовая история для дашборда: загружено %d свечей по %d символам; "
+                 "запрошенный период до %d дней.", total_loaded, len(symbols), days)
+    else:
+        log.info("Почасовая история для дашборда актуальна (%d символов).", len(symbols))
 
 
 def check_and_load_daily_history(session, symbols: List[str], history_days=None,
@@ -1619,28 +1716,71 @@ class Portfolio:
 # ============================================================
 # ТОРГОВЫЕ ПРИМИТИВЫ
 # ============================================================
-def get_qty(session, symbol, usd_amount, price):
-    info = session.get_instruments_info(
-        category="linear", symbol=symbol
-    )["result"]["list"][0]
-    f = info["lotSizeFilter"]
-    step = float(f.get("qtyStep", 0.001))
-    min_qty = float(f.get("minOrderQty", 0.0))
-    raw = usd_amount / price
-    qty = math.floor(raw / step) * step
-    qty = max(qty, min_qty)
-    decimals = max(0, -int(math.floor(math.log10(step)))) if step < 1 else 0
-    return round(qty, decimals)
+_QTY_RULES_CACHE: Dict[str, Tuple[Decimal, Decimal]] = {}
+_QTY_RULES_LOCK = threading.Lock()
 
 
-def place_market(session, symbol, side, qty, position_idx):
-    if qty is None or float(qty) <= 0:
-        raise ValueError(f"{symbol}: qty={qty} ≤ 0")
+def get_qty_rules(session, symbol):
+    """Return exact Decimal (qtyStep, minOrderQty), cached per symbol."""
+    with _QTY_RULES_LOCK:
+        cached = _QTY_RULES_CACHE.get(symbol)
+    if cached:
+        return cached
+    info = session.get_instruments_info(category="linear", symbol=symbol)["result"]["list"][0]
+    lot = info.get("lotSizeFilter", {})
+    step = Decimal(str(lot.get("qtyStep", "0.001")))
+    minimum = Decimal(str(lot.get("minOrderQty", "0")))
+    if step <= 0:
+        raise ValueError(f"{symbol}: invalid qtyStep={step}")
+    rules = (step, minimum)
+    with _QTY_RULES_LOCK:
+        _QTY_RULES_CACHE[symbol] = rules
+    return rules
+
+
+def format_order_qty(session, symbol, qty, *, enforce_min=True):
+    """Floor qty to exchange step using Decimal; return clean API string.
+
+    Never rounds a reduce-only close upward: upward rounding could exceed the
+    real position and be rejected or accidentally create exposure.
+    """
+    step, min_qty = get_qty_rules(session, symbol)
     try:
-        resp = session.place_order(
-            category="linear", symbol=symbol, side=side,
-            orderType="Market", qty=str(qty), positionIdx=position_idx,
-        )
+        value = Decimal(str(qty))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError(f"{symbol}: invalid qty={qty!r}") from exc
+    if not value.is_finite() or value <= 0:
+        raise ValueError(f"{symbol}: invalid qty={qty!r}")
+    units = (value / step).to_integral_value(rounding=ROUND_DOWN)
+    normalized = units * step
+    if normalized <= 0 or (enforce_min and normalized < min_qty):
+        raise ValueError(f"{symbol}: qty {value} becomes {normalized}, min={min_qty}, step={step}")
+    decimals = max(0, -step.as_tuple().exponent)
+    return f"{normalized:.{decimals}f}"
+
+
+def get_qty(session, symbol, usd_amount, price):
+    if price <= 0:
+        raise ValueError(f"{symbol}: invalid price={price}")
+    step, min_qty = get_qty_rules(session, symbol)
+    raw = Decimal(str(usd_amount)) / Decimal(str(price))
+    qty = (raw / step).to_integral_value(rounding=ROUND_DOWN) * step
+    qty = max(qty, min_qty)
+    decimals = max(0, -step.as_tuple().exponent)
+    return float(f"{qty:.{decimals}f}")
+
+
+def place_market(session, symbol, side, qty, position_idx, reduce_only=False):
+    qty_api = format_order_qty(session, symbol, qty)
+    try:
+        params = {
+            "category": "linear", "symbol": symbol, "side": side,
+            "orderType": "Market", "qty": qty_api,
+            "positionIdx": position_idx,
+        }
+        if reduce_only:
+            params["reduceOnly"] = True
+        resp = session.place_order(**params)
     except Exception as e:
         raise
 
@@ -2358,15 +2498,24 @@ def close_complex(session, cs: ComplexState, portfolio: Portfolio = None):
     pos_idx_leg1 = 1 if cs.leg1_long else 2
     pos_idx_leg2 = 2 if cs.leg1_long else 1
 
+    live_positions = get_all_positions_rich(session)
     for sym in cs.complex["leg1"]:
-        qty = cs.total_qty(sym)
+        state_qty = cs.total_qty(sym)
+        live_pos = live_positions.get((sym, pos_idx_leg1))
+        qty = float(live_pos.get("size", 0) or 0) if live_pos else 0.0
+        if not CONFIG.get("close_use_exchange_position_size", True):
+            qty = state_qty
         if qty > 0:
             orig_side = "Buy" if cs.leg1_long else "Sell"
             close_side = "Sell" if orig_side == "Buy" else "Buy"
             targets.append((sym, close_side, qty, pos_idx_leg1))
 
     for sym in cs.complex["leg2"]:
-        qty = cs.total_qty(sym)
+        state_qty = cs.total_qty(sym)
+        live_pos = live_positions.get((sym, pos_idx_leg2))
+        qty = float(live_pos.get("size", 0) or 0) if live_pos else 0.0
+        if not CONFIG.get("close_use_exchange_position_size", True):
+            qty = state_qty
         if qty > 0:
             orig_side = "Sell" if cs.leg1_long else "Buy"
             close_side = "Sell" if orig_side == "Buy" else "Buy"
@@ -2415,17 +2564,33 @@ def _close_symbols_fast(session, symbol_side_size_idx_list, max_retries=None):
 
     def _fire(sym, side, size, p_idx):
         try:
-            return sym, place_market(session, sym, side, size, p_idx), None
+            # Position may have changed since targets were assembled. For close
+            # requests use the current exchange size, never stale state qty.
+            live_now = get_all_positions_rich(session).get((sym, p_idx))
+            if not live_now or float(live_now.get("size", 0) or 0) <= 0:
+                return sym, None, "ALREADY_CLOSED"
+            close_size = live_now["size"]
+            order_id = place_market(session, sym, side, close_size, p_idx, reduce_only=True)
+            return sym, order_id, None
         except Exception as e:
-            return sym, None, str(e)
+            err = str(e)
+            if "110017" in err:
+                try:
+                    refreshed = get_all_positions_rich(session).get((sym, p_idx))
+                    if not refreshed or float(refreshed.get("size", 0) or 0) <= 0:
+                        return sym, None, "ALREADY_CLOSED"
+                except Exception:
+                    pass
+            return sym, None, err
 
     with ThreadPoolExecutor(max_workers=min(workers, len(symbol_side_size_idx_list))) as ex:
         for f in as_completed([ex.submit(_fire, *t) for t in symbol_side_size_idx_list]):
             sym, oid, err = f.result()
             if err:
-                failed.append((sym, err))
-                log.error("  close %s: %s", sym, err)
-            else:
+                if err != "ALREADY_CLOSED":
+                    failed.append((sym, err))
+                    log.error("  close %s: %s", sym, err)
+            elif oid:
                 order_ids[sym] = oid
 
     time.sleep(float(CONFIG.get("close_verify_wait_sec", 0.5)))
@@ -2450,7 +2615,8 @@ def _close_symbols_fast(session, symbol_side_size_idx_list, max_retries=None):
             for f in as_completed([ex.submit(_fire, *t) for t in retry]):
                 sym, oid, err = f.result()
                 if err:
-                    failed.append((sym, err))
+                    if err != "ALREADY_CLOSED":
+                        failed.append((sym, err))
                 elif oid:
                     order_ids[sym] = oid
         time.sleep(float(CONFIG.get("close_verify_wait_sec", 0.5)))
@@ -2460,6 +2626,16 @@ def _close_symbols_fast(session, symbol_side_size_idx_list, max_retries=None):
             if (sym, p_idx) in live:
                 still_open.append(sym)
 
+    # Результат сверки с биржей важнее промежуточных ответов ордера:
+    # если символа/positionIdx уже нет в live positions, ранний отказ не должен
+    # заставлять close_complex бесконечно считать комплект незакрытым.
+    still_open_keys = {(sym, p_idx) for sym, side, size, p_idx in symbol_side_size_idx_list
+                       if (sym, p_idx) in live}
+    targets_by_symbol = {}
+    for sym, side, size, p_idx in symbol_side_size_idx_list:
+        targets_by_symbol.setdefault(sym, set()).add((sym, p_idx))
+    failed = [(sym, err) for sym, err in failed
+              if targets_by_symbol.get(sym, set()) & still_open_keys]
     return still_open, failed, order_ids
 
 
@@ -2644,10 +2820,19 @@ def fill_free_slots(trade, portfolio: Portfolio):
 # ============================================================
 # СОПРОВОЖДЕНИЕ
 # ============================================================
+LAST_MONITOR_PRICES: Dict[str, float] = {}
+LAST_MONITOR_POSITIONS: Dict = {}
+LAST_MONITOR_SNAPSHOT_TS: float = 0.0
+
+
 def monitor_active(trade, portfolio: Portfolio):
+    global LAST_MONITOR_PRICES, LAST_MONITOR_POSITIONS, LAST_MONITOR_SNAPSHOT_TS
     max_c = CONFIG["max_concurrent_complexes"]
     prices = get_all_prices(trade)
     positions_rich = get_all_positions_rich(trade)
+    LAST_MONITOR_PRICES = dict(prices)
+    LAST_MONITOR_POSITIONS = dict(positions_rich)
+    LAST_MONITOR_SNAPSHOT_TS = time.time()
     taker_rate = float(CONFIG.get("taker_fee_rate", 0.00055))
 
     with PORTFOLIO_LOCK:
@@ -2829,6 +3014,260 @@ def reconcile_state_with_exchange(trade, portfolio: Portfolio):
 
 
 # ============================================================
+# TELEGRAM LIVE STATUS + EQUITY CHART
+# ============================================================
+def _read_message_id(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            value = f.read().strip()
+        return int(value) if value else None
+    except (OSError, ValueError):
+        return None
+
+
+def _write_message_id(path, message_id):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(str(int(message_id)))
+    except OSError as exc:
+        log.warning("Telegram: не удалось сохранить ID %s: %s", path, exc)
+
+
+def _telegram_api(method):
+    if not TELEGRAM_TOKEN:
+        raise RuntimeError("Telegram token отсутствует: настройте api_config.py")
+    return f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/{method}"
+
+
+def _pin_telegram_message(message_id):
+    try:
+        response = requests.post(_telegram_api("pinChatMessage"), data={
+            "chat_id": TELEGRAM_CHAT_ID, "message_id": int(message_id),
+            "disable_notification": True,
+        }, timeout=8)
+        result = response.json()
+        if not result.get("ok"):
+            log.warning("Telegram pinChatMessage: %s", result.get("description", result))
+        return bool(result.get("ok"))
+    except Exception as exc:
+        log.warning("Telegram pinChatMessage failed: %s", exc)
+        return False
+
+
+def _post_telegram_text(text):
+    if not TELEGRAM_CHAT_ID:
+        return False
+    path = CONFIG.get("telegram_text_id_path", "msg.txt")
+    setup_path = CONFIG.get("telegram_text_setup_path", "msg_initialized.once")
+    msg_id = _read_message_id(path)
+    initialized = os.path.isfile(setup_path)
+    if msg_id and initialized:
+        try:
+            response = requests.post(_telegram_api("editMessageText"), data={
+                "chat_id": TELEGRAM_CHAT_ID, "message_id": msg_id, "text": text,
+                "disable_web_page_preview": True,
+            }, timeout=8)
+            result = response.json()
+            if result.get("ok") or "message is not modified" in str(result).lower():
+                return True
+            log.warning("Telegram editMessageText: %s", result.get("description", result))
+        except Exception as exc:
+            log.warning("Telegram editMessageText failed: %s", exc)
+    try:
+        response = requests.post(_telegram_api("sendMessage"), data={
+            "chat_id": TELEGRAM_CHAT_ID, "text": text,
+            "disable_web_page_preview": True,
+        }, timeout=8)
+        result = response.json()
+        if result.get("ok"):
+            new_id = result["result"]["message_id"]
+            _write_message_id(path, new_id)
+            _pin_telegram_message(new_id)
+            try:
+                with open(setup_path, "w", encoding="utf-8") as marker:
+                    marker.write(str(int(time.time())))
+            except OSError as exc:
+                log.warning("Telegram setup marker write failed: %s", exc)
+            return True
+        log.warning("Telegram sendMessage: %s", result.get("description", result))
+    except Exception as exc:
+        log.warning("Telegram sendMessage failed: %s", exc)
+    return False
+
+
+def _load_equity_rows(hours=24):
+    cutoff = int((time.time() - max(1, int(hours)) * 3600) * 1000)
+    try:
+        with sqlite3.connect(trade_log.DB_PATH, timeout=5) as conn:
+            return conn.execute(
+                "SELECT ts_ms,total_equity FROM equity WHERE ts_ms>=? "
+                "ORDER BY ts_ms", (cutoff,)
+            ).fetchall()
+    except Exception as exc:
+        log.warning("Telegram equity history unavailable: %s", exc)
+        return []
+
+
+def _render_live_equity_chart(current_equity):
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from matplotlib.dates import DateFormatter, AutoDateLocator
+        from datetime import timedelta
+
+        hours = int(CONFIG.get("telegram_equity_chart_hours", 24))
+        rows = _load_equity_rows(hours)
+        now = datetime.now(timezone.utc)
+        if not rows:
+            rows = [(int(time.time() * 1000), float(current_equity))]
+        ts = [datetime.fromtimestamp(int(r[0]) / 1000, timezone.utc) for r in rows]
+        values = [float(r[1]) for r in rows]
+        # Keep chart responsive and small: downsample to at most 900 points.
+        if len(ts) > 900:
+            stride = max(1, len(ts) // 900)
+            ts, values = ts[::stride], values[::stride]
+            if ts[-1] != datetime.fromtimestamp(int(rows[-1][0]) / 1000, timezone.utc):
+                ts.append(datetime.fromtimestamp(int(rows[-1][0]) / 1000, timezone.utc))
+                values.append(float(rows[-1][1]))
+        fig, ax = plt.subplots(figsize=(10, 4.8), dpi=130)
+        fig.patch.set_facecolor("#ffffff")
+        ax.set_facecolor("#f7f9fc")
+        ax.plot(ts, values, color="#276ef1", linewidth=2.0)
+        ax.fill_between(ts, values, min(values), color="#276ef1", alpha=0.12)
+        ax.scatter([ts[-1]], [values[-1]], color="#00a878", s=32, zorder=3)
+        ax.set_title(f"Equity · последние {hours} ч · UTC", loc="left", fontsize=13, weight="bold")
+        ax.set_ylabel("USDT")
+        ax.grid(True, alpha=0.22)
+        ax.xaxis.set_major_locator(AutoDateLocator(minticks=4, maxticks=8))
+        ax.xaxis.set_major_formatter(DateFormatter("%d.%m %H:%M", tz=timezone.utc))
+        ax.tick_params(axis="x", labelrotation=0, labelsize=8)
+        ax.annotate(f"{float(current_equity):,.2f}", (ts[-1], values[-1]),
+                    xytext=(7, 8), textcoords="offset points", fontsize=9)
+        fig.tight_layout()
+        output = CONFIG.get("telegram_equity_chart_path", "live_graf.png")
+        fig.savefig(output, format="png", bbox_inches="tight")
+        plt.close(fig)
+        return output
+    except Exception as exc:
+        log.warning("Telegram equity chart render failed: %s", exc)
+        return None
+
+
+def _post_telegram_photo(photo_path, caption):
+    if not TELEGRAM_CHAT_ID or not photo_path or not os.path.isfile(photo_path):
+        return False
+    path = CONFIG.get("telegram_photo_id_path", "msg_id.txt")
+    setup_path = CONFIG.get("telegram_photo_setup_path", "photo_initialized.once")
+    msg_id = _read_message_id(path)
+    initialized = os.path.isfile(setup_path)
+    if msg_id and initialized:
+        media = {"type": "photo", "media": "attach://photo", "caption": caption[:1024]}
+        try:
+            with open(photo_path, "rb") as photo:
+                response = requests.post(_telegram_api("editMessageMedia"),
+                    data={"chat_id": TELEGRAM_CHAT_ID, "message_id": msg_id,
+                          "media": json.dumps(media, ensure_ascii=False)},
+                    files={"photo": (os.path.basename(photo_path), photo, "image/png")},
+                    timeout=15)
+            result = response.json()
+            if result.get("ok") or "message is not modified" in str(result).lower():
+                return True
+            log.warning("Telegram editMessageMedia: %s", result.get("description", result))
+        except Exception as exc:
+            log.warning("Telegram editMessageMedia failed: %s", exc)
+    try:
+        with open(photo_path, "rb") as photo:
+            response = requests.post(_telegram_api("sendPhoto"),
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption[:1024]},
+                files={"photo": (os.path.basename(photo_path), photo, "image/png")},
+                timeout=15)
+        result = response.json()
+        if result.get("ok"):
+            new_id = result["result"]["message_id"]
+            _write_message_id(path, new_id)
+            _pin_telegram_message(new_id)
+            try:
+                with open(setup_path, "w", encoding="utf-8") as marker:
+                    marker.write(str(int(time.time())))
+            except OSError as exc:
+                log.warning("Telegram photo setup marker write failed: %s", exc)
+            return True
+        log.warning("Telegram sendPhoto: %s", result.get("description", result))
+    except Exception as exc:
+        log.warning("Telegram sendPhoto failed: %s", exc)
+    return False
+
+
+def _closed_net_pnl_total():
+    try:
+        with sqlite3.connect(trade_log.DB_PATH, timeout=5) as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(pnl_usd),0) FROM trades WHERE event='close'"
+            ).fetchone()
+        return float(row[0] or 0.0)
+    except Exception:
+        return 0.0
+
+
+def update_telegram_live(trade, portfolio, balance=None, positions=None):
+    """Edit one status message and one equity chart photo; call no faster than 10s."""
+    if not CONFIG.get("telegram_live_enabled", True) or not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    try:
+        if balance is None:
+            balance = trade.get_wallet_balance(accountType="UNIFIED")["result"]["list"][0]
+        equity = float(balance.get("totalEquity", 0) or 0)
+        available = float(balance.get("totalAvailableBalance", 0) or 0)
+        if positions is None:
+            positions = get_all_positions_rich(trade)
+        prices = (dict(LAST_MONITOR_PRICES)
+                  if time.time() - LAST_MONITOR_SNAPSHOT_TS <= 20
+                  else get_all_prices(trade))
+        with PORTFOLIO_LOCK:
+            active = list(portfolio.active)
+            reserve_count = len(portfolio.reserve)
+            rebuild_running = bool(REBUILD_STATE.get("running"))
+        unrealized = sum(float(pos.get("unrealisedPnl", 0) or 0) for pos in positions.values())
+        active_net = sum(complex_net_pnl(cs, positions, prices,
+                              float(CONFIG.get("taker_fee_rate", 0.00055))) for cs in active)
+        active_gross = sum(complex_gross_pnl(cs, positions) for cs in active)
+        adds = sum(max(0, len(cs.layers) - 1) for cs in active)
+        layer_count = sum(len(cs.layers) for cs in active)
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        mode = " " if CONFIG.get("demo", True) else "REAL"
+        text = [
+            f"Spread Bot · {mode} · {stamp}",
+            f"Equity: {equity:,.2f} USDT | Свободная маржа: {available:,.2f} USDT",
+            f"Unrealized PnL: {unrealized:+,.2f} USDT",
+            f"Активные комплексы: {len(active)}/{CONFIG['max_concurrent_complexes']} | "
+            f"позиций: {len(positions)} | слоёв: {layer_count} (доборов: {adds})",
+            f"PnL активных: net {active_net:+,.2f} / gross {active_gross:+,.2f} USDT | "
+            f"закрыто net: {_closed_net_pnl_total():+,.2f} USDT",
+            f"Резерв: {reserve_count} | пересборка: {'идёт' if rebuild_running else 'нет'}",
+        ]
+        for idx, cs in enumerate(active, 1):
+            l1 = "/".join(s.replace("USDT", "") for s in cs.complex["leg1"])
+            l2 = "/".join(s.replace("USDT", "") for s in cs.complex["leg2"])
+            spread = compute_spread_cached(cs, prices)
+            entry_spread = float(getattr(cs, "entry_spread", 0.0) or 0.0)
+            d_max = float(cs.complex.get("d_max", 0.0) or 0.0)
+            ratio = abs(spread) / d_max if d_max > 0 else 0.0
+            gross = complex_gross_pnl(cs, positions)
+            net = complex_net_pnl(cs, positions, prices, float(CONFIG.get("taker_fee_rate", 0.00055)))
+            grid_idx = int(getattr(cs, "grid_level_index", max(0, len(cs.layers) - 1)))
+            text.append(f"{idx}) {l1} ↔ {l2} | layers {len(cs.layers)}")
+        status = "\n".join(text)[:4000]
+        _post_telegram_text(status)
+        chart = _render_live_equity_chart(equity)
+        if chart:
+            _post_telegram_photo(chart, f"Equity {equity:,.2f} USDT · последние "
+                                  f"{CONFIG.get('telegram_equity_chart_hours', 24)} ч · {mode}")
+    except Exception as exc:
+        log.exception("Telegram live update failed: %s", exc)
+
+
+# ============================================================
 # MAIN
 # ============================================================
 def main():
@@ -2844,6 +3283,8 @@ def main():
              CONFIG["deposit"], CONFIG["max_concurrent_complexes"], ALLOCATED_CAPITAL, COMPLEX_TARGET)
     log.info("Разрешение повторного использования: %s (макс %d)",
              "ON" if CONFIG.get("allow_symbol_reuse") else "OFF", CONFIG.get("max_symbol_usage"))
+    if CONFIG.get("telegram_live_enabled", True) and not TELEGRAM_TOKEN:
+        log.warning("Telegram live status disabled: задайте api_t в api_config.py")
 
     reconcile_state_with_exchange(trade, portfolio)
 
@@ -2856,6 +3297,15 @@ def main():
     if all_syms:
         start_ms = int(datetime.now(timezone.utc).timestamp() * 1000) - CONFIG["history_days"] * 86400_000
         ensure_month_refs(list(all_syms), start_ms)
+        if CONFIG.get("dashboard_hourly_history_enabled", True):
+            try:
+                market = make_market_session()
+                check_and_load_hourly_history(
+                    market, sorted(all_syms),
+                    history_days=CONFIG.get("dashboard_hourly_history_days", 365),
+                )
+            except Exception as e:
+                log.exception("Не удалось загрузить начальную часовую историю: %s", e)
     last_equity_snap_ts = 0.0
     prev_active_count = len(portfolio.active)
     last_rebuild_finish_ts = time.time()
@@ -2883,6 +3333,11 @@ def main():
                     try:
                         _market = make_market_session()
                         check_and_load_history(_market, sorted(active_syms))
+                        if CONFIG.get("dashboard_hourly_history_enabled", True):
+                            check_and_load_hourly_history(
+                                _market, sorted(active_syms),
+                                history_days=CONFIG.get("dashboard_hourly_history_days", 365),
+                            )
                     except Exception as e:
                         log.warning("active history refresh: %s", e)
                 last_active_history_ts = time.time()
@@ -2902,7 +3357,7 @@ def main():
                 finally:
                     last_orphan_check = time.time()
 
-            if time.time() - last_equity_snap_ts > 60:
+            if time.time() - last_equity_snap_ts >= float(CONFIG.get("telegram_update_interval_sec", 10)):
                 try:
                     bal = trade.get_wallet_balance(accountType="UNIFIED")["result"]["list"][0]
                     te = float(bal.get("totalEquity", 0))
@@ -2910,9 +3365,10 @@ def main():
                     _pos = get_all_positions_rich(trade)
                     unrl = sum(float(p.get("unrealisedPnl", 0)) for p in _pos.values())
                     trade_log.log_equity(te, av, unrl)
+                    update_telegram_live(trade, portfolio, balance=bal, positions=_pos)
                     last_equity_snap_ts = time.time()
                 except Exception as e:
-                    pass
+                    log.warning("Live telemetry snapshot failed: %s", e)
 
             with PORTFOLIO_LOCK:
                 active_count = len(portfolio.active)
@@ -2983,7 +3439,7 @@ def main():
                 total_empty = not portfolio.active and not portfolio.reserve
                 still_running = REBUILD_STATE["running"]
             if total_empty and not still_running:
-                time.sleep(60)
+                time.sleep(min(10, int(CONFIG.get("telegram_update_interval_sec", 10))))
                 continue
 
             time.sleep(CONFIG["monitor_interval_sec"])
