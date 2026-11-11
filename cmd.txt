@@ -1,144 +1,153 @@
 C:\Users\Admin>python "C:\Users\Admin\syntech_spread\dry_run_candidate_selection.py"
 SPREAD BOT CANDIDATE SELECTION — READ-ONLY DRY RUN
-Generated UTC: 2026-11-11 11:11:48
+Generated UTC: 2026-11-11 11:33:14
 Bot: C:\Users\Admin\syntech_spread\syntech_spread_v6_roi_levels.py
 Database (SQLite read-only): C:\Users\Admin\bybit_1m.db
 State (read-only): C:\Users\Admin\state.json
 Bybit access: public market-data GET only; no account/private endpoints or orders
-Target candidates: 12 | concurrent slots: 6 | reserve target: 6
+Candidate-pool target: 12 | maximum active complexes: 6
 
-2026-11-11 14:11:49,904 [INFO] Кандидатов по обороту ≥ $1M: 255
-2026-11-11 14:12:38,675 [INFO] Прошли глубину стакана ≥ $1000: 244
-Symbols passing public liquidity/volatility screening: 219
+2026-11-11 14:33:15,131 [INFO] Кандидатов по обороту ≥ $1M: 253
+2026-11-11 14:34:05,275 [INFO] Прошли глубину стакана ≥ $1000: 245
+Symbols passing public liquidity/volatility screening: 221
 Active symbols/directions loaded from state.json: 36
-Universe symbols after active-exposure limit: 219
-1m pivot: 219 symbols, 14326 aligned bars
-2026-11-11 14:13:35,349 [INFO] Загрузка month_refs для 219 символов...
-2026-11-11 14:13:35,498 [INFO] Загружено month_refs: 219
-2026-11-11 14:13:37,222 [WARNING] ПАМП/ДАМП-ФИЛЬТР (structural): отсеиваю 42 символов:
-2026-11-11 14:13:37,223 [WARNING]   - ARIAUSDT        bias=0.89>0.7 (однонаправленность)
-2026-11-11 14:13:37,223 [WARNING]   - HUSDT           bias=0.78>0.7 (однонаправленность)
-2026-11-11 14:13:37,223 [WARNING]   - CASHCATUSDT     bias=0.88>0.7 (однонаправленность)
-2026-11-11 14:13:37,223 [WARNING]   - ZECUSDT         bias=0.75>0.7 (однонаправленность)
-2026-11-11 14:13:37,224 [WARNING]   - STONKUSDT       bias=0.80>0.7 (однонаправленность)
-2026-11-11 14:13:37,224 [WARNING]   - WAVESUSDT       zscore=7.74>6.0
-2026-11-11 14:13:37,225 [WARNING]   - SNXXUSDT        bias=0.71>0.7 (однонаправленность)
-2026-11-11 14:13:37,226 [WARNING]   - PONSUSDT        bias=0.71>0.7 (однонаправленность)
-2026-11-11 14:13:37,228 [WARNING]   - ZROUSDT         bias=0.78>0.7 (однонаправленность)
-2026-11-11 14:13:37,228 [WARNING]   - VVVUSDT         bias=0.88>0.7 (однонаправленность)
-2026-11-11 14:13:37,229 [WARNING]   - BARDUSDT        bias=0.84>0.7 (однонаправленность)
-2026-11-11 14:13:37,230 [WARNING]   - HUMAUSDT        bias=0.86>0.7 (однонаправленность)
-2026-11-11 14:13:37,231 [WARNING]   - UNIUSDT         bias=0.80>0.7 (однонаправленность)
-2026-11-11 14:13:37,231 [WARNING]   - PUMPFUNUSDT     bias=0.78>0.7 (однонаправленность)
-2026-11-11 14:13:37,232 [WARNING]   - NVDAUSDT        bias=0.75>0.7 (однонаправленность)
-2026-11-11 14:13:37,233 [WARNING]   - NVDLUSDT        bias=0.78>0.7 (однонаправленность)
-2026-11-11 14:13:37,234 [WARNING]   - GRASSUSDT       bias=0.88>0.7 (однонаправленность)
-2026-11-11 14:13:37,234 [WARNING]   - IRYSUSDT        bias=0.78>0.7 (однонаправленность)
-2026-11-11 14:13:37,235 [WARNING]   - WLDUSDT         bias=0.86>0.7 (однонаправленность)
-2026-11-11 14:13:37,235 [WARNING]   - HYPEUSDT        bias=0.80>0.7 (однонаправленность)
-2026-11-11 14:13:37,236 [WARNING]   - XRPUSDT         bias=0.74>0.7 (однонаправленность)
-2026-11-11 14:13:37,237 [WARNING]   - CTUSDT          bias=0.77>0.7 (однонаправленность)
-2026-11-11 14:13:37,237 [WARNING]   - AXISUSDT        bias=0.79>0.7 (однонаправленность)
-2026-11-11 14:13:37,238 [WARNING]   - BILLUSDT        bias=0.76>0.7 (однонаправленность)
-2026-11-11 14:13:37,238 [WARNING]   - TAUSDT          bias=0.71>0.7 (однонаправленность)
-2026-11-11 14:13:37,239 [WARNING]   - XPLUSDT         bias=0.71>0.7 (однонаправленность)
-2026-11-11 14:13:37,242 [WARNING]   - MONUSDT         bias=0.70>0.7 (однонаправленность)
-2026-11-11 14:13:37,243 [WARNING]   - BERAUSDT        bias=0.76>0.7 (однонаправленность)
-2026-11-11 14:13:37,244 [WARNING]   - TRUMPUSDT       bias=0.97>0.7 (однонаправленность)
-2026-11-11 14:13:37,245 [WARNING]   - DOTUSDT         bias=0.71>0.7 (однонаправленность)
-2026-11-11 14:13:37,246 [WARNING]   - STRKUSDT        bias=0.77>0.7 (однонаправленность)
-2026-11-11 14:13:37,247 [WARNING]   - CHIPUSDT        bias=0.76>0.7 (однонаправленность)
-2026-11-11 14:13:37,248 [WARNING]   - BCHUSDT         bias=0.75>0.7 (однонаправленность)
-2026-11-11 14:13:37,248 [WARNING]   - CLUSDT          bias=0.84>0.7 (однонаправленность)
-2026-11-11 14:13:37,249 [WARNING]   - VIRTUALUSDT     bias=0.72>0.7 (однонаправленность)
-2026-11-11 14:13:37,250 [WARNING]   - XMRUSDT         bias=0.70>0.7 (однонаправленность)
-2026-11-11 14:13:37,251 [WARNING]   - APEUSDT         bias=0.76>0.7 (однонаправленность)
-2026-11-11 14:13:37,258 [WARNING]   - PENGUUSDT       bias=0.74>0.7 (однонаправленность)
-2026-11-11 14:13:37,259 [WARNING]   - XRPPERP         bias=0.74>0.7 (однонаправленность)
-2026-11-11 14:13:37,260 [WARNING]   - PENDLEUSDT      bias=0.79>0.7 (однонаправленность)
-2026-11-11 14:13:37,260 [WARNING]   - SKYUSDT         bias=0.78>0.7 (однонаправленность)
-2026-11-11 14:13:37,261 [WARNING]   - POPCATUSDT      bias=0.73>0.7 (однонаправленность)
-2026-11-11 14:13:37,292 [INFO] После фильтра осталось символов: 177
-After pump/dump filtering: 177 symbols
-Cached D data: 177 symbols, 364 dates; missing data will be REVIEW/penalized, not fetched
+Active complexes in state.json: 6/6
+Universe symbols after active-exposure limit: 221
+1m pivot: 221 symbols, 14326 aligned bars
+2026-11-11 14:35:01,342 [INFO] Загрузка month_refs для 221 символов...
+2026-11-11 14:35:01,690 [INFO] Загружено month_refs: 221
+2026-11-11 14:35:03,629 [WARNING] ПАМП/ДАМП-ФИЛЬТР (structural): отсеиваю 42 символов:
+2026-11-11 14:35:03,630 [WARNING]   - ARIAUSDT        bias=0.89>0.7 (однонаправленность)
+2026-11-11 14:35:03,630 [WARNING]   - HUSDT           bias=0.78>0.7 (однонаправленность)
+2026-11-11 14:35:03,630 [WARNING]   - CASHCATUSDT     bias=0.88>0.7 (однонаправленность)
+2026-11-11 14:35:03,630 [WARNING]   - ZECUSDT         bias=0.75>0.7 (однонаправленность)
+2026-11-11 14:35:03,631 [WARNING]   - STONKUSDT       bias=0.80>0.7 (однонаправленность)
+2026-11-11 14:35:03,631 [WARNING]   - WAVESUSDT       zscore=7.74>6.0
+2026-11-11 14:35:03,632 [WARNING]   - SNXXUSDT        bias=0.71>0.7 (однонаправленность)
+2026-11-11 14:35:03,633 [WARNING]   - ZROUSDT         bias=0.78>0.7 (однонаправленность)
+2026-11-11 14:35:03,633 [WARNING]   - VVVUSDT         bias=0.88>0.7 (однонаправленность)
+2026-11-11 14:35:03,634 [WARNING]   - BARDUSDT        bias=0.84>0.7 (однонаправленность)
+2026-11-11 14:35:03,634 [WARNING]   - PONSUSDT        bias=0.71>0.7 (однонаправленность)
+2026-11-11 14:35:03,635 [WARNING]   - HUMAUSDT        bias=0.86>0.7 (однонаправленность)
+2026-11-11 14:35:03,636 [WARNING]   - UNIUSDT         bias=0.80>0.7 (однонаправленность)
+2026-11-11 14:35:03,636 [WARNING]   - PUMPFUNUSDT     bias=0.78>0.7 (однонаправленность)
+2026-11-11 14:35:03,637 [WARNING]   - NVDAUSDT        bias=0.75>0.7 (однонаправленность)
+2026-11-11 14:35:03,638 [WARNING]   - NVDLUSDT        bias=0.78>0.7 (однонаправленность)
+2026-11-11 14:35:03,638 [WARNING]   - XPLUSDT         bias=0.71>0.7 (однонаправленность)
+2026-11-11 14:35:03,639 [WARNING]   - IRYSUSDT        bias=0.78>0.7 (однонаправленность)
+2026-11-11 14:35:03,640 [WARNING]   - WLDUSDT         bias=0.86>0.7 (однонаправленность)
+2026-11-11 14:35:03,641 [WARNING]   - HYPEUSDT        bias=0.80>0.7 (однонаправленность)
+2026-11-11 14:35:03,655 [WARNING]   - XRPUSDT         bias=0.74>0.7 (однонаправленность)
+2026-11-11 14:35:03,657 [WARNING]   - CTUSDT          bias=0.77>0.7 (однонаправленность)
+2026-11-11 14:35:03,658 [WARNING]   - AXISUSDT        bias=0.79>0.7 (однонаправленность)
+2026-11-11 14:35:03,659 [WARNING]   - BILLUSDT        bias=0.76>0.7 (однонаправленность)
+2026-11-11 14:35:03,659 [WARNING]   - TAUSDT          bias=0.71>0.7 (однонаправленность)
+2026-11-11 14:35:03,660 [WARNING]   - MONUSDT         bias=0.70>0.7 (однонаправленность)
+2026-11-11 14:35:03,661 [WARNING]   - BERAUSDT        bias=0.76>0.7 (однонаправленность)
+2026-11-11 14:35:03,661 [WARNING]   - TRUMPUSDT       bias=0.97>0.7 (однонаправленность)
+2026-11-11 14:35:03,662 [WARNING]   - DOTUSDT         bias=0.71>0.7 (однонаправленность)
+2026-11-11 14:35:03,662 [WARNING]   - STRKUSDT        bias=0.77>0.7 (однонаправленность)
+2026-11-11 14:35:03,663 [WARNING]   - CHIPUSDT        bias=0.76>0.7 (однонаправленность)
+2026-11-11 14:35:03,664 [WARNING]   - BCHUSDT         bias=0.75>0.7 (однонаправленность)
+2026-11-11 14:35:03,665 [WARNING]   - CLUSDT          bias=0.84>0.7 (однонаправленность)
+2026-11-11 14:35:03,666 [WARNING]   - GRASSUSDT       bias=0.88>0.7 (однонаправленность)
+2026-11-11 14:35:03,666 [WARNING]   - VIRTUALUSDT     bias=0.72>0.7 (однонаправленность)
+2026-11-11 14:35:03,667 [WARNING]   - XMRUSDT         bias=0.70>0.7 (однонаправленность)
+2026-11-11 14:35:03,668 [WARNING]   - APEUSDT         bias=0.76>0.7 (однонаправленность)
+2026-11-11 14:35:03,669 [WARNING]   - PENGUUSDT       bias=0.74>0.7 (однонаправленность)
+2026-11-11 14:35:03,669 [WARNING]   - XRPPERP         bias=0.74>0.7 (однонаправленность)
+2026-11-11 14:35:03,670 [WARNING]   - PENDLEUSDT      bias=0.79>0.7 (однонаправленность)
+2026-11-11 14:35:03,671 [WARNING]   - POPCATUSDT      bias=0.73>0.7 (однонаправленность)
+2026-11-11 14:35:03,671 [WARNING]   - SKYUSDT         bias=0.78>0.7 (однонаправленность)
+2026-11-11 14:35:03,741 [INFO] После фильтра осталось символов: 179
+After pump/dump filtering: 179 symbols
+Cached D data: 179 symbols, 364 dates; missing data will be REVIEW/penalized, not fetched
 Building candidates with bot.build_complexes(...); this may take a few minutes.
-2026-11-11 14:13:38,124 [INFO] Кэш когерентности: 177 символов, corr_min=0.05
-2026-11-11 14:13:38,125 [INFO] Оценка всех C(177,3) = 908600 ног...
-2026-11-11 14:15:39,192 [INFO] Оценено ног: 908600 за 121.1s
-2026-11-11 14:15:40,050 [INFO] Топ-1000 ног: топ-5 символов по частоте: [('JCTUSDT', 1000), ('ICNTUSDT', 175), ('PIEVERSEUSDT', 174), ('FLYUSDT', 170), ('HANAUSDT', 164)]
-2026-11-11 14:15:40,051 [INFO] Diversity-фильтр: max_per_symbol = 12 (из 250 ног)
-2026-11-11 14:15:40,333 [INFO] Топ-250 ног (diversity).
-2026-11-11 14:15:40,335 [INFO] Оценка пар...
-2026-11-11 14:15:40,335 [INFO] Предресемплирование 250 ног к 5min...
-2026-11-11 14:15:42,597 [INFO] Готово 250 ног, оценка пар...
-2026-11-11 14:15:50,362 [INFO]   ...пар: 4650/31125 (14.9%) | валидных: 1691 | coherence_rej: 639 | pre_scored: 1691
-2026-11-11 14:16:00,364 [INFO]   ...пар: 20376/31125 (65.5%) | валидных: 4292 | coherence_rej: 3849 | pre_scored: 4292
-2026-11-11 14:16:04,260 [INFO] Шаг 1 завершен: валидных 5346, прошли быстрый фильтр 5346 за 23.9s
-2026-11-11 14:16:04,264 [INFO] Шаг 2: Годовой анализ для топ-5346 пар...
-2026-11-11 14:16:05,330 [WARNING] QUALITY GATE reject JCTUSDT/HANAUSDT/ICNTUSDT / ERAUSDT/CYBERUSDT/INJUSDT | reasons=persistent_extreme_excursion=4.29z/50d | raw=13.680 rank(old/new)=9.134/4.243 factor(old/new)=0.668/0.310 | corr=0.053 spike_share=0.828 max_exc_z=4.288 recovery_days=50.0
-2026-11-11 14:16:05,523 [WARNING] QUALITY GATE reject JCTUSDT/ERAUSDT/ICNTUSDT / UAIUSDT/PARTIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.50z/25d | raw=13.632 rank(old/new)=3.520/2.221 factor(old/new)=0.258/0.163 | corr=-0.226 spike_share=0.842 max_exc_z=4.498 recovery_days=25.0
-2026-11-11 14:16:20,631 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/B2USDT / UAIUSDT/BLUAIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.62z/21d | raw=12.438 rank(old/new)=2.639/1.866 factor(old/new)=0.212/0.150 | corr=-0.281 spike_share=0.831 max_exc_z=4.62 recovery_days=21.0
-2026-11-11 14:16:22,953 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/METUSDT / UAIUSDT/PARTIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.44z/25d | raw=12.372 rank(old/new)=3.339/2.064 factor(old/new)=0.270/0.167 | corr=-0.237 spike_share=0.83 max_exc_z=4.444 recovery_days=25.0
-2026-11-11 14:16:25,668 [WARNING] QUALITY GATE reject JCTUSDT/ERAUSDT/ICNTUSDT / UAIUSDT/BLUAIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.59z/21d | raw=12.285 rank(old/new)=2.477/1.843 factor(old/new)=0.202/0.150 | corr=-0.274 spike_share=0.83 max_exc_z=4.589 recovery_days=21.0
-2026-11-11 14:16:29,524 [WARNING] QUALITY GATE reject JCTUSDT/ERAUSDT/ICNTUSDT / MAGMAUSDT/ESPORTSUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.83z/17d | raw=12.204 rank(old/new)=3.536/2.298 factor(old/new)=0.290/0.188 | corr=-0.092 spike_share=0.899 max_exc_z=4.832 recovery_days=17.0
-2026-11-11 14:16:33,369 [WARNING] QUALITY GATE reject JCTUSDT/ERAUSDT/ICNTUSDT / UAIUSDT/BEATUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.41z/25d | raw=12.063 rank(old/new)=2.673/1.809 factor(old/new)=0.222/0.150 | corr=-0.281 spike_share=0.845 max_exc_z=4.414 recovery_days=25.0
-2026-11-11 14:16:33,934 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/B2USDT / ERAUSDT/CYBERUSDT/INJUSDT | reasons=persistent_extreme_excursion=4.28z/57d | raw=12.047 rank(old/new)=8.748/3.825 factor(old/new)=0.726/0.318 | corr=0.082 spike_share=0.807 max_exc_z=4.278 recovery_days=57.0
-2026-11-11 14:16:34,506 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/MERLUSDT / UAIUSDT/BLUAIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.61z/21d | raw=12.027 rank(old/new)=2.280/1.804 factor(old/new)=0.190/0.150 | corr=-0.272 spike_share=0.833 max_exc_z=4.612 recovery_days=21.0
-2026-11-11 14:16:35,427 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/MEGAUSDT / UAIUSDT/BEATUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.53z/25d | raw=11.983 rank(old/new)=2.437/1.797 factor(old/new)=0.203/0.150 | corr=-0.277 spike_share=0.851 max_exc_z=4.533 recovery_days=25.0
-2026-11-11 14:16:38,506 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/MERLUSDT / MAGMAUSDT/ESPORTSUSDT/BEAMUSDT | reasons=persistent_extreme_excursion=4.21z/19d | raw=11.879 rank(old/new)=4.432/2.768 factor(old/new)=0.373/0.233 | corr=-0.063 spike_share=0.913 max_exc_z=4.211 recovery_days=19.0
-2026-11-11 14:16:40,901 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/MERLUSDT / UAIUSDT/BEATUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.45z/25d | raw=11.800 rank(old/new)=2.320/1.770 factor(old/new)=0.197/0.150 | corr=-0.276 spike_share=0.85 max_exc_z=4.446 recovery_days=25.0
-2026-11-11 14:16:42,823 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/METUSDT / UAIUSDT/BEATUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.31z/25d | raw=11.722 rank(old/new)=2.732/1.758 factor(old/new)=0.233/0.150 | corr=-0.297 spike_share=0.843 max_exc_z=4.311 recovery_days=25.0
-2026-11-11 14:16:43,380 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/METUSDT / UAIUSDT/BLUAIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.53z/21d | raw=11.677 rank(old/new)=2.486/1.752 factor(old/new)=0.213/0.150 | corr=-0.283 spike_share=0.828 max_exc_z=4.534 recovery_days=21.0
-2026-11-11 14:16:47,492 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/MEGAUSDT / MAGMAUSDT/ESPORTSUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.85z/17d | raw=11.516 rank(old/new)=2.816/1.938 factor(old/new)=0.244/0.168 | corr=-0.088 spike_share=0.909 max_exc_z=4.851 recovery_days=17.0
-2026-11-11 14:16:47,734 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/B2USDT / MAGMAUSDT/ESPORTSUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.82z/17d | raw=11.475 rank(old/new)=3.657/2.295 factor(old/new)=0.319/0.200 | corr=-0.092 spike_share=0.908 max_exc_z=4.822 recovery_days=17.0
-2026-11-11 14:16:48,360 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/B2USDT / UAIUSDT/BEATUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.51z/25d | raw=11.428 rank(old/new)=2.681/1.714 factor(old/new)=0.235/0.150 | corr=-0.291 spike_share=0.846 max_exc_z=4.513 recovery_days=25.0
-2026-11-11 14:16:50,179 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/MERLUSDT / MAGMAUSDT/ESPORTSUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.81z/17d | raw=11.350 rank(old/new)=3.574/2.269 factor(old/new)=0.315/0.200 | corr=-0.084 spike_share=0.911 max_exc_z=4.811 recovery_days=17.0
-2026-11-11 14:16:51,568 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/METUSDT / MAGMAUSDT/ESPORTSUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.81z/17d | raw=11.253 rank(old/new)=3.727/2.296 factor(old/new)=0.331/0.204 | corr=-0.101 spike_share=0.881 max_exc_z=4.807 recovery_days=17.0
-2026-11-11 14:16:51,865 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/MEGAUSDT / UAIUSDT/PARTIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.55z/26d | raw=11.191 rank(old/new)=2.675/1.729 factor(old/new)=0.239/0.154 | corr=-0.223 spike_share=0.845 max_exc_z=4.546 recovery_days=26.0
-2026-11-11 14:16:52,640 [WARNING] QUALITY GATE reject JCTUSDT/HANAUSDT/ICNTUSDT / ERAUSDT/MEGAUSDT/INJUSDT | reasons=persistent_extreme_excursion=4.26z/50d | raw=11.108 rank(old/new)=6.709/3.452 factor(old/new)=0.604/0.311 | corr=0.093 spike_share=0.827 max_exc_z=4.258 recovery_days=50.0
-2026-11-11 14:16:54,973 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/B2USDT / UAIUSDT/PARTIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.51z/25d | raw=10.761 rank(old/new)=3.068/1.854 factor(old/new)=0.285/0.172 | corr=-0.234 spike_share=0.841 max_exc_z=4.513 recovery_days=25.0
-2026-11-11 14:16:55,282 [WARNING] QUALITY GATE reject JCTUSDT/ERAUSDT/ICNTUSDT / MEGAUSDT/INJUSDT/METUSDT | reasons=persistent_extreme_excursion=4.22z/52d | raw=10.669 rank(old/new)=3.996/2.470 factor(old/new)=0.374/0.232 | corr=0.085 spike_share=0.852 max_exc_z=4.221 recovery_days=52.0
-2026-11-11 14:16:55,941 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/MEGAUSDT / UAIUSDT/BLUAIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.62z/21d | raw=10.496 rank(old/new)=1.969/1.574 factor(old/new)=0.188/0.150 | corr=-0.272 spike_share=0.834 max_exc_z=4.622 recovery_days=21.0
-2026-11-11 14:16:56,223 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/B2USDT / ERAUSDT/MEGAUSDT/INJUSDT | reasons=persistent_extreme_excursion=4.34z/55d | raw=10.431 rank(old/new)=6.778/3.429 factor(old/new)=0.650/0.329 | corr=0.142 spike_share=0.826 max_exc_z=4.34 recovery_days=55.0
-2026-11-11 14:16:57,710 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/MERLUSDT / UAIUSDT/PARTIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.52z/25d | raw=10.172 rank(old/new)=2.192/1.526 factor(old/new)=0.215/0.150 | corr=-0.222 spike_share=0.846 max_exc_z=4.521 recovery_days=25.0
-2026-11-11 14:17:01,108 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEAMUSDT / CYBERUSDT/INJUSDT/ACTUSDT | reasons=persistent_extreme_excursion=4.27z/25d | raw=4.640 rank(old/new)=1.475/0.800 factor(old/new)=0.318/0.172 | corr=-0.262 spike_share=0.936 max_exc_z=4.273 recovery_days=25.0
-2026-11-11 14:17:01,499 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEATUSDT / ERAUSDT/CYBERUSDT/ACTUSDT | reasons=persistent_extreme_excursion=4.27z/17d | raw=4.332 rank(old/new)=0.664/0.650 factor(old/new)=0.153/0.150 | corr=-0.344 spike_share=0.947 max_exc_z=4.271 recovery_days=17.0
-2026-11-11 14:17:01,865 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEAMUSDT / ERAUSDT/CYBERUSDT/ACTUSDT | reasons=persistent_one_leg_and_noncoherent=0.953/corr-0.291/26d | raw=4.057 rank(old/new)=0.920/0.609 factor(old/new)=0.227/0.150 | corr=-0.291 spike_share=0.953 max_exc_z=4.092 recovery_days=26.0
-2026-11-11 14:17:02,227 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEATUSDT / CYBERUSDT/INJUSDT/ACTUSDT | reasons=persistent_extreme_excursion=4.42z/32d | raw=3.993 rank(old/new)=0.708/0.599 factor(old/new)=0.177/0.150 | corr=-0.326 spike_share=0.918 max_exc_z=4.425 recovery_days=32.0
-2026-11-11 14:17:02,380 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEAMUSDT / ERAUSDT/CYBERUSDT/INJUSDT | reasons=persistent_extreme_excursion=4.30z/26d | raw=3.948 rank(old/new)=1.250/0.652 factor(old/new)=0.317/0.165 | corr=-0.312 spike_share=0.933 max_exc_z=4.296 recovery_days=26.0
-2026-11-11 14:17:02,934 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/APRUSDT / ERAUSDT/CYBERUSDT/ACTUSDT | reasons=persistent_extreme_excursion=4.61z/29d | raw=3.812 rank(old/new)=1.120/0.577 factor(old/new)=0.294/0.151 | corr=-0.348 spike_share=0.942 max_exc_z=4.606 recovery_days=29.0
-2026-11-11 14:17:03,498 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEATUSDT / ERAUSDT/CYBERUSDT/INJUSDT | reasons=persistent_extreme_excursion=4.42z/32d | raw=3.682 rank(old/new)=0.706/0.552 factor(old/new)=0.192/0.150 | corr=-0.387 spike_share=0.918 max_exc_z=4.419 recovery_days=32.0
-2026-11-11 14:17:04,186 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEAMUSDT / ERAUSDT/MEGAUSDT/INJUSDT | reasons=persistent_extreme_excursion=4.33z/25d | raw=3.563 rank(old/new)=0.952/0.538 factor(old/new)=0.267/0.151 | corr=-0.312 spike_share=0.93 max_exc_z=4.331 recovery_days=25.0
-2026-11-11 14:17:13,812 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEAMUSDT / MEGAUSDT/B2USDT/INJUSDT | reasons=persistent_extreme_excursion=4.25z/25d | raw=3.053 rank(old/new)=0.818/0.479 factor(old/new)=0.268/0.157 | corr=-0.26 spike_share=0.938 max_exc_z=4.251 recovery_days=25.0
-2026-11-11 14:17:15,128 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/APRUSDT / MEGAUSDT/B2USDT/MERLUSDT | reasons=persistent_extreme_excursion=4.62z/15d; persistent_one_leg_and_noncoherent=0.959/corr-0.279/15d | raw=3.017 rank(old/new)=0.805/0.470 factor(old/new)=0.267/0.156 | corr=-0.279 spike_share=0.959 max_exc_z=4.618 recovery_days=15.0
-2026-11-11 14:17:18,256 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/APRUSDT / MEGAUSDT/B2USDT/METUSDT | reasons=persistent_extreme_excursion=4.62z/13d | raw=2.910 rank(old/new)=0.861/0.526 factor(old/new)=0.296/0.181 | corr=-0.166 spike_share=0.924 max_exc_z=4.616 recovery_days=13.0
-2026-11-11 14:17:19,053 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEAMUSDT / ERAUSDT/B2USDT/INJUSDT | reasons=persistent_extreme_excursion=4.24z/17d | raw=2.892 rank(old/new)=0.950/0.513 factor(old/new)=0.329/0.177 | corr=-0.282 spike_share=0.937 max_exc_z=4.239 recovery_days=17.0
-2026-11-11 14:17:20,811 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/APRUSDT / ERAUSDT/MEGAUSDT/METUSDT | reasons=persistent_extreme_excursion=4.67z/15d | raw=2.843 rank(old/new)=0.848/0.483 factor(old/new)=0.298/0.170 | corr=-0.25 spike_share=0.914 max_exc_z=4.673 recovery_days=15.0
-2026-11-11 14:17:22,398 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/APRUSDT / ERAUSDT/B2USDT/MERLUSDT | reasons=persistent_extreme_excursion=4.65z/29d | raw=2.803 rank(old/new)=0.854/0.428 factor(old/new)=0.305/0.153 | corr=-0.358 spike_share=0.949 max_exc_z=4.65 recovery_days=29.0
-2026-11-11 14:17:23,482 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEATUSDT / ERAUSDT/MEGAUSDT/B2USDT | reasons=persistent_extreme_excursion=4.29z/16d | raw=2.775 rank(old/new)=0.416/0.416 factor(old/new)=0.150/0.150 | corr=-0.407 spike_share=0.947 max_exc_z=4.292 recovery_days=16.0
-2026-11-11 14:17:29,244 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEATUSDT / ERAUSDT/B2USDT/MERLUSDT | reasons=persistent_extreme_excursion=4.26z/16d | raw=2.656 rank(old/new)=0.428/0.398 factor(old/new)=0.161/0.150 | corr=-0.332 spike_share=0.942 max_exc_z=4.262 recovery_days=16.0
-2026-11-11 14:17:30,708 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/APRUSDT / ERAUSDT/MEGAUSDT/B2USDT | reasons=persistent_extreme_excursion=4.71z/15d | raw=2.624 rank(old/new)=0.712/0.394 factor(old/new)=0.272/0.150 | corr=-0.432 spike_share=0.942 max_exc_z=4.711 recovery_days=15.0
-2026-11-11 14:17:42,259 [WARNING] QUALITY GATE reject UAIUSDT/BEATUSDT/APRUSDT / ERAUSDT/CYBERUSDT/ACTUSDT | reasons=persistent_extreme_excursion=4.50z/25d | raw=2.379 rank(old/new)=0.419/0.361 factor(old/new)=0.176/0.152 | corr=0.12 spike_share=0.898 max_exc_z=4.502 recovery_days=25.0
-2026-11-11 14:17:49,646 [WARNING] QUALITY GATE reject UAIUSDT/BEATUSDT/APRUSDT / ERAUSDT/B2USDT/MERLUSDT | reasons=persistent_extreme_excursion=4.27z/27d | raw=2.238 rank(old/new)=0.378/0.336 factor(old/new)=0.169/0.150 | corr=-0.034 spike_share=0.901 max_exc_z=4.266 recovery_days=27.0
-2026-11-11 14:17:54,965 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEATUSDT / MEGAUSDT/B2USDT/MERLUSDT | reasons=persistent_extreme_excursion=4.27z/16d; persistent_one_leg_and_noncoherent=0.965/corr-0.272/16d | raw=2.129 rank(old/new)=0.319/0.319 factor(old/new)=0.150/0.150 | corr=-0.272 spike_share=0.965 max_exc_z=4.273 recovery_days=16.0
-2026-11-11 14:17:59,052 [WARNING] QUALITY GATE reject UAIUSDT/BEATUSDT/APRUSDT / ERAUSDT/MEGAUSDT/METUSDT | reasons=persistent_extreme_excursion=4.39z/25d | raw=2.044 rank(old/new)=0.377/0.307 factor(old/new)=0.184/0.150 | corr=-0.024 spike_share=0.902 max_exc_z=4.386 recovery_days=25.0
-2026-11-11 14:18:05,061 [WARNING] QUALITY GATE reject UAIUSDT/BEATUSDT/APRUSDT / MEGAUSDT/B2USDT/METUSDT | reasons=persistent_extreme_excursion=4.25z/25d | raw=1.946 rank(old/new)=0.349/0.292 factor(old/new)=0.179/0.150 | corr=-0.047 spike_share=0.906 max_exc_z=4.249 recovery_days=25.0
-2026-11-11 14:20:12,719 [INFO] Годовой анализ завершен за 248.5s | quality_gate rejected=48/5346
-2026-11-11 14:20:12,741 [INFO] Собрано комплектов: 9 | использовано символов: 66/177 | возможно ещё: 18
-2026-11-11 14:20:12,742 [WARNING] Собрано меньше min_complexes=12: 9.
+2026-11-11 14:35:04,473 [INFO] Кэш когерентности: 179 символов, corr_min=0.05
+2026-11-11 14:35:04,481 [INFO] Оценка всех C(179,3) = 939929 ног...
+2026-11-11 14:37:01,504 [INFO] Оценено ног: 939929 за 117.0s
+2026-11-11 14:37:02,741 [INFO] Топ-1000 ног: топ-5 символов по частоте: [('JCTUSDT', 1000), ('ICNTUSDT', 177), ('PIEVERSEUSDT', 176), ('FLYUSDT', 172), ('HANAUSDT', 164)]
+2026-11-11 14:37:02,746 [INFO] Diversity-фильтр: max_per_symbol = 12 (из 250 ног)
+2026-11-11 14:37:03,006 [INFO] Топ-250 ног (diversity).
+2026-11-11 14:37:03,008 [INFO] Оценка пар...
+2026-11-11 14:37:03,009 [INFO] Предресемплирование 250 ног к 5min...
+2026-11-11 14:37:05,178 [INFO] Готово 250 ног, оценка пар...
+2026-11-11 14:37:13,011 [INFO]   ...пар: 12654/31125 (40.7%) | валидных: 2267 | coherence_rej: 3224 | pre_scored: 2267
+2026-11-11 14:37:23,012 [INFO]   ...пар: 23545/31125 (75.6%) | валидных: 5090 | coherence_rej: 4601 | pre_scored: 5090
+2026-11-11 14:37:25,657 [INFO] Шаг 1 завершен: валидных 5812, прошли быстрый фильтр 5812 за 22.6s
+2026-11-11 14:37:25,663 [INFO] Шаг 2: Годовой анализ для топ-5812 пар...
+2026-11-11 14:37:27,322 [WARNING] QUALITY GATE reject JCTUSDT/HANAUSDT/ICNTUSDT / ERAUSDT/CYBERUSDT/INJUSDT | reasons=persistent_extreme_excursion=4.29z/50d | raw=13.408 rank(old/new)=8.953/4.159 factor(old/new)=0.668/0.310 | corr=0.053 spike_share=0.828 max_exc_z=4.288 recovery_days=50.0
+2026-11-11 14:37:36,883 [WARNING] QUALITY GATE reject JCTUSDT/HANAUSDT/ICNTUSDT / ERAUSDT/MEGAUSDT/INJUSDT | reasons=persistent_extreme_excursion=4.26z/50d | raw=12.293 rank(old/new)=7.425/3.821 factor(old/new)=0.604/0.311 | corr=0.093 spike_share=0.827 max_exc_z=4.258 recovery_days=50.0
+2026-11-11 14:37:41,889 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/METUSDT / UAIUSDT/PARTIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.44z/25d | raw=12.124 rank(old/new)=3.272/2.022 factor(old/new)=0.270/0.167 | corr=-0.237 spike_share=0.83 max_exc_z=4.444 recovery_days=25.0
+2026-11-11 14:37:44,752 [WARNING] QUALITY GATE reject JCTUSDT/ERAUSDT/ICNTUSDT / UAIUSDT/BLUAIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.59z/21d | raw=12.036 rank(old/new)=2.426/1.805 factor(old/new)=0.202/0.150 | corr=-0.274 spike_share=0.83 max_exc_z=4.589 recovery_days=21.0
+2026-11-11 14:37:46,831 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/RSRUSDT / UAIUSDT/BLUAIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.63z/21d | raw=11.990 rank(old/new)=2.372/1.798 factor(old/new)=0.198/0.150 | corr=-0.293 spike_share=0.82 max_exc_z=4.635 recovery_days=21.0
+2026-11-11 14:37:47,078 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/RSRUSDT / UAIUSDT/BEATUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.45z/25d | raw=11.982 rank(old/new)=2.604/1.797 factor(old/new)=0.217/0.150 | corr=-0.295 spike_share=0.843 max_exc_z=4.446 recovery_days=25.0
+2026-11-11 14:37:48,009 [WARNING] QUALITY GATE reject JCTUSDT/ERAUSDT/ICNTUSDT / MAGMAUSDT/ESPORTSUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.83z/17d | raw=11.957 rank(old/new)=3.464/2.251 factor(old/new)=0.290/0.188 | corr=-0.092 spike_share=0.899 max_exc_z=4.832 recovery_days=17.0
+2026-11-11 14:37:48,145 [WARNING] QUALITY GATE reject JCTUSDT/ERAUSDT/ICNTUSDT / UAIUSDT/PARTIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.50z/25d | raw=11.949 rank(old/new)=3.085/1.946 factor(old/new)=0.258/0.163 | corr=-0.226 spike_share=0.842 max_exc_z=4.498 recovery_days=25.0
+2026-11-11 14:37:48,678 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/B2USDT / UAIUSDT/BLUAIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.62z/21d | raw=11.914 rank(old/new)=2.528/1.787 factor(old/new)=0.212/0.150 | corr=-0.281 spike_share=0.831 max_exc_z=4.62 recovery_days=21.0
+2026-11-11 14:37:49,069 [WARNING] QUALITY GATE reject JCTUSDT/HANAUSDT/ICNTUSDT / MEGAUSDT/INJUSDT/RSRUSDT | reasons=persistent_extreme_excursion=4.28z/50d | raw=11.900 rank(old/new)=6.740/3.576 factor(old/new)=0.566/0.300 | corr=0.095 spike_share=0.835 max_exc_z=4.283 recovery_days=50.0
+2026-11-11 14:37:51,419 [WARNING] QUALITY GATE reject JCTUSDT/ERAUSDT/ICNTUSDT / UAIUSDT/BEATUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.41z/25d | raw=11.819 rank(old/new)=2.619/1.773 factor(old/new)=0.222/0.150 | corr=-0.281 spike_share=0.845 max_exc_z=4.414 recovery_days=25.0
+2026-11-11 14:37:52,401 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/B2USDT / ERAUSDT/CYBERUSDT/INJUSDT | reasons=persistent_extreme_excursion=4.28z/57d | raw=11.800 rank(old/new)=8.569/3.746 factor(old/new)=0.726/0.318 | corr=0.082 spike_share=0.807 max_exc_z=4.278 recovery_days=57.0
+2026-11-11 14:37:53,788 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/MEGAUSDT / UAIUSDT/BEATUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.53z/25d | raw=11.740 rank(old/new)=2.388/1.761 factor(old/new)=0.203/0.150 | corr=-0.277 spike_share=0.851 max_exc_z=4.533 recovery_days=25.0
+2026-11-11 14:37:54,326 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/MEGAUSDT / UAIUSDT/BLUAIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.62z/21d | raw=11.696 rank(old/new)=2.194/1.754 factor(old/new)=0.188/0.150 | corr=-0.272 spike_share=0.834 max_exc_z=4.622 recovery_days=21.0
+2026-11-11 14:37:56,716 [WARNING] QUALITY GATE reject JCTUSDT/ERAUSDT/ICNTUSDT / MEGAUSDT/INJUSDT/RSRUSDT | reasons=persistent_extreme_excursion=4.26z/53d | raw=11.592 rank(old/new)=5.307/3.167 factor(old/new)=0.458/0.273 | corr=0.137 spike_share=0.86 max_exc_z=4.258 recovery_days=53.0
+2026-11-11 14:37:57,813 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/B2USDT / MEGAUSDT/INJUSDT/RSRUSDT | reasons=persistent_extreme_excursion=4.36z/53d | raw=11.574 rank(old/new)=6.566/3.653 factor(old/new)=0.567/0.316 | corr=0.156 spike_share=0.838 max_exc_z=4.356 recovery_days=53.0
+2026-11-11 14:38:00,509 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/METUSDT / UAIUSDT/BEATUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.31z/25d | raw=11.485 rank(old/new)=2.677/1.723 factor(old/new)=0.233/0.150 | corr=-0.297 spike_share=0.843 max_exc_z=4.311 recovery_days=25.0
+2026-11-11 14:38:01,015 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/METUSDT / UAIUSDT/BLUAIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.53z/21d | raw=11.440 rank(old/new)=2.436/1.716 factor(old/new)=0.213/0.150 | corr=-0.283 spike_share=0.828 max_exc_z=4.534 recovery_days=21.0
+2026-11-11 14:38:04,946 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/B2USDT / MAGMAUSDT/ESPORTSUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.82z/17d | raw=11.240 rank(old/new)=3.582/2.248 factor(old/new)=0.319/0.200 | corr=-0.092 spike_share=0.908 max_exc_z=4.822 recovery_days=17.0
+2026-11-11 14:38:05,358 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/B2USDT / UAIUSDT/BEATUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.51z/25d | raw=11.196 rank(old/new)=2.627/1.679 factor(old/new)=0.235/0.150 | corr=-0.291 spike_share=0.846 max_exc_z=4.513 recovery_days=25.0
+2026-11-11 14:38:09,715 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/METUSDT / MAGMAUSDT/ESPORTSUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.81z/17d | raw=11.022 rank(old/new)=3.651/2.249 factor(old/new)=0.331/0.204 | corr=-0.101 spike_share=0.881 max_exc_z=4.807 recovery_days=17.0
+2026-11-11 14:38:09,990 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/MEGAUSDT / UAIUSDT/PARTIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.55z/26d | raw=10.965 rank(old/new)=2.621/1.694 factor(old/new)=0.239/0.154 | corr=-0.223 spike_share=0.845 max_exc_z=4.546 recovery_days=26.0
+2026-11-11 14:38:15,901 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/B2USDT / UAIUSDT/PARTIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.51z/25d | raw=10.545 rank(old/new)=3.006/1.817 factor(old/new)=0.285/0.172 | corr=-0.234 spike_share=0.841 max_exc_z=4.513 recovery_days=25.0
+2026-11-11 14:38:17,579 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/RSRUSDT / UAIUSDT/PARTIUSDT/BEATUSDT | reasons=persistent_extreme_excursion=4.47z/25d | raw=10.371 rank(old/new)=2.688/1.681 factor(old/new)=0.259/0.162 | corr=-0.24 spike_share=0.833 max_exc_z=4.473 recovery_days=25.0
+2026-11-11 14:38:18,722 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/B2USDT / ERAUSDT/MEGAUSDT/INJUSDT | reasons=persistent_extreme_excursion=4.34z/55d | raw=10.218 rank(old/new)=6.640/3.359 factor(old/new)=0.650/0.329 | corr=0.142 spike_share=0.826 max_exc_z=4.34 recovery_days=55.0
+2026-11-11 14:38:18,786 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/B2USDT / ERAUSDT/MEGAUSDT/RSRUSDT | reasons=persistent_extreme_excursion=4.33z/35d | raw=10.214 rank(old/new)=4.304/3.307 factor(old/new)=0.421/0.324 | corr=0.211 spike_share=0.807 max_exc_z=4.334 recovery_days=35.0
+2026-11-11 14:38:19,081 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/RSRUSDT / MAGMAUSDT/ESPORTSUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.82z/17d | raw=10.138 rank(old/new)=2.969/1.910 factor(old/new)=0.293/0.188 | corr=-0.101 spike_share=0.893 max_exc_z=4.824 recovery_days=17.0
+2026-11-11 14:38:19,274 [WARNING] QUALITY GATE reject JCTUSDT/ICNTUSDT/MEGAUSDT / MAGMAUSDT/ESPORTSUSDT/APRUSDT | reasons=persistent_extreme_excursion=4.85z/17d | raw=10.124 rank(old/new)=2.475/1.704 factor(old/new)=0.244/0.168 | corr=-0.088 spike_share=0.909 max_exc_z=4.851 recovery_days=17.0
+2026-11-11 14:38:22,820 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEAMUSDT / CYBERUSDT/INJUSDT/ACTUSDT | reasons=persistent_extreme_excursion=4.27z/25d | raw=4.595 rank(old/new)=1.461/0.793 factor(old/new)=0.318/0.172 | corr=-0.262 spike_share=0.936 max_exc_z=4.273 recovery_days=25.0
+2026-11-11 14:38:23,233 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEATUSDT / ERAUSDT/CYBERUSDT/ACTUSDT | reasons=persistent_extreme_excursion=4.27z/17d | raw=4.342 rank(old/new)=0.665/0.651 factor(old/new)=0.153/0.150 | corr=-0.344 spike_share=0.947 max_exc_z=4.271 recovery_days=17.0
+2026-11-11 14:38:23,670 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEAMUSDT / ERAUSDT/CYBERUSDT/ACTUSDT | reasons=persistent_one_leg_and_noncoherent=0.953/corr-0.291/26d | raw=4.065 rank(old/new)=0.922/0.610 factor(old/new)=0.227/0.150 | corr=-0.291 spike_share=0.953 max_exc_z=4.092 recovery_days=26.0
+2026-11-11 14:38:23,906 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEAMUSDT / ERAUSDT/CYBERUSDT/INJUSDT | reasons=persistent_extreme_excursion=4.30z/26d | raw=4.020 rank(old/new)=1.273/0.664 factor(old/new)=0.317/0.165 | corr=-0.312 spike_share=0.933 max_exc_z=4.296 recovery_days=26.0
+2026-11-11 14:38:23,968 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEATUSDT / CYBERUSDT/INJUSDT/ACTUSDT | reasons=persistent_extreme_excursion=4.42z/32d | raw=4.001 rank(old/new)=0.709/0.600 factor(old/new)=0.177/0.150 | corr=-0.326 spike_share=0.918 max_exc_z=4.425 recovery_days=32.0
+2026-11-11 14:38:24,496 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/APRUSDT / ERAUSDT/CYBERUSDT/ACTUSDT | reasons=persistent_extreme_excursion=4.61z/29d | raw=3.822 rank(old/new)=1.123/0.578 factor(old/new)=0.294/0.151 | corr=-0.348 spike_share=0.942 max_exc_z=4.606 recovery_days=29.0
+2026-11-11 14:38:25,411 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEAMUSDT / ERAUSDT/MEGAUSDT/INJUSDT | reasons=persistent_extreme_excursion=4.33z/25d | raw=3.609 rank(old/new)=0.964/0.545 factor(old/new)=0.267/0.151 | corr=-0.312 spike_share=0.93 max_exc_z=4.331 recovery_days=25.0
+2026-11-11 14:38:29,125 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEAMUSDT / ERAUSDT/MEGAUSDT/RSRUSDT | reasons=persistent_extreme_excursion=4.21z/24d | raw=3.312 rank(old/new)=0.691/0.497 factor(old/new)=0.208/0.150 | corr=-0.334 spike_share=0.945 max_exc_z=4.205 recovery_days=24.0
+2026-11-11 14:38:29,619 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEAMUSDT / MEGAUSDT/INJUSDT/RSRUSDT | reasons=persistent_extreme_excursion=4.38z/24d | raw=3.293 rank(old/new)=0.916/0.514 factor(old/new)=0.278/0.156 | corr=-0.303 spike_share=0.919 max_exc_z=4.376 recovery_days=24.0
+2026-11-11 14:38:35,710 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEAMUSDT / MEGAUSDT/B2USDT/INJUSDT | reasons=persistent_extreme_excursion=4.25z/25d | raw=3.054 rank(old/new)=0.818/0.479 factor(old/new)=0.268/0.157 | corr=-0.26 spike_share=0.938 max_exc_z=4.251 recovery_days=25.0
+2026-11-11 14:38:37,074 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/APRUSDT / MEGAUSDT/B2USDT/MERLUSDT | reasons=persistent_extreme_excursion=4.62z/15d; persistent_one_leg_and_noncoherent=0.959/corr-0.279/15d | raw=3.017 rank(old/new)=0.805/0.470 factor(old/new)=0.267/0.156 | corr=-0.279 spike_share=0.959 max_exc_z=4.618 recovery_days=15.0
+2026-11-11 14:38:37,383 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEAMUSDT / ERAUSDT/B2USDT/INJUSDT | reasons=persistent_extreme_excursion=4.24z/17d | raw=3.013 rank(old/new)=0.990/0.534 factor(old/new)=0.329/0.177 | corr=-0.282 spike_share=0.937 max_exc_z=4.239 recovery_days=17.0
+2026-11-11 14:38:38,346 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/APRUSDT / ERAUSDT/MEGAUSDT/RSRUSDT | reasons=persistent_extreme_excursion=4.70z/15d; persistent_one_leg_and_noncoherent=0.964/corr-0.417/15d | raw=2.974 rank(old/new)=0.808/0.446 factor(old/new)=0.272/0.150 | corr=-0.417 spike_share=0.964 max_exc_z=4.7 recovery_days=15.0
+2026-11-11 14:38:39,963 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/APRUSDT / MEGAUSDT/B2USDT/RSRUSDT | reasons=persistent_extreme_excursion=4.63z/13d; persistent_one_leg_and_noncoherent=0.951/corr-0.287/13d | raw=2.922 rank(old/new)=0.782/0.454 factor(old/new)=0.268/0.155 | corr=-0.287 spike_share=0.951 max_exc_z=4.631 recovery_days=13.0
+2026-11-11 14:38:40,574 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/APRUSDT / MEGAUSDT/B2USDT/METUSDT | reasons=persistent_extreme_excursion=4.62z/13d | raw=2.911 rank(old/new)=0.861/0.526 factor(old/new)=0.296/0.181 | corr=-0.166 spike_share=0.924 max_exc_z=4.616 recovery_days=13.0
+2026-11-11 14:38:43,265 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/APRUSDT / ERAUSDT/MEGAUSDT/METUSDT | reasons=persistent_extreme_excursion=4.67z/15d | raw=2.845 rank(old/new)=0.848/0.484 factor(old/new)=0.298/0.170 | corr=-0.25 spike_share=0.914 max_exc_z=4.673 recovery_days=15.0
+2026-11-11 14:38:46,176 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEATUSDT / ERAUSDT/MEGAUSDT/B2USDT | reasons=persistent_extreme_excursion=4.29z/16d | raw=2.776 rank(old/new)=0.416/0.416 factor(old/new)=0.150/0.150 | corr=-0.407 spike_share=0.947 max_exc_z=4.292 recovery_days=16.0
+2026-11-11 14:38:53,229 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEATUSDT / ERAUSDT/MEGAUSDT/RSRUSDT | reasons=persistent_extreme_excursion=4.37z/29d | raw=2.627 rank(old/new)=0.394/0.394 factor(old/new)=0.150/0.150 | corr=-0.415 spike_share=0.936 max_exc_z=4.374 recovery_days=29.0
+2026-11-11 14:38:53,332 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/APRUSDT / ERAUSDT/MEGAUSDT/B2USDT | reasons=persistent_extreme_excursion=4.71z/15d | raw=2.625 rank(old/new)=0.713/0.394 factor(old/new)=0.272/0.150 | corr=-0.432 spike_share=0.942 max_exc_z=4.711 recovery_days=15.0
+2026-11-11 14:38:57,043 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEATUSDT / MEGAUSDT/INJUSDT/RSRUSDT | reasons=persistent_extreme_excursion=4.37z/33d | raw=2.559 rank(old/new)=0.447/0.384 factor(old/new)=0.175/0.150 | corr=-0.385 spike_share=0.919 max_exc_z=4.368 recovery_days=33.0
+2026-11-11 14:39:07,439 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEATUSDT / MEGAUSDT/B2USDT/RSRUSDT | reasons=persistent_extreme_excursion=4.35z/21d | raw=2.348 rank(old/new)=0.352/0.352 factor(old/new)=0.150/0.150 | corr=-0.293 spike_share=0.939 max_exc_z=4.353 recovery_days=21.0
+2026-11-11 14:39:07,798 [WARNING] QUALITY GATE reject UAIUSDT/BEATUSDT/APRUSDT / ERAUSDT/CYBERUSDT/ACTUSDT | reasons=persistent_extreme_excursion=4.50z/25d | raw=2.342 rank(old/new)=0.413/0.356 factor(old/new)=0.176/0.152 | corr=0.12 spike_share=0.898 max_exc_z=4.502 recovery_days=25.0
+2026-11-11 14:39:19,075 [WARNING] QUALITY GATE reject MAGMAUSDT/ESPORTSUSDT/BEATUSDT / MEGAUSDT/B2USDT/MERLUSDT | reasons=persistent_extreme_excursion=4.27z/16d; persistent_one_leg_and_noncoherent=0.965/corr-0.272/16d | raw=2.129 rank(old/new)=0.319/0.319 factor(old/new)=0.150/0.150 | corr=-0.272 spike_share=0.965 max_exc_z=4.273 recovery_days=16.0
+2026-11-11 14:39:23,482 [WARNING] QUALITY GATE reject UAIUSDT/BEATUSDT/APRUSDT / ERAUSDT/MEGAUSDT/METUSDT | reasons=persistent_extreme_excursion=4.39z/25d | raw=2.045 rank(old/new)=0.377/0.307 factor(old/new)=0.184/0.150 | corr=-0.024 spike_share=0.902 max_exc_z=4.386 recovery_days=25.0
+2026-11-11 14:39:30,082 [WARNING] QUALITY GATE reject UAIUSDT/BEATUSDT/APRUSDT / MEGAUSDT/B2USDT/METUSDT | reasons=persistent_extreme_excursion=4.25z/25d | raw=1.944 rank(old/new)=0.348/0.292 factor(old/new)=0.179/0.150 | corr=-0.047 spike_share=0.906 max_exc_z=4.249 recovery_days=25.0
+2026-11-11 14:39:38,156 [WARNING] QUALITY GATE reject UAIUSDT/BEATUSDT/APRUSDT / AGIUSDT/ENAUSDT/LSKUSDT | reasons=persistent_extreme_excursion=4.38z/26d | raw=1.838 rank(old/new)=0.349/0.276 factor(old/new)=0.190/0.150 | corr=-0.046 spike_share=0.894 max_exc_z=4.375 recovery_days=26.0
+2026-11-11 14:41:46,954 [INFO] Годовой анализ завершен за 261.3s | quality_gate rejected=54/5812
+2026-11-11 14:41:46,979 [INFO] Собрано комплектов: 10 | использовано символов: 67/179 | возможно ещё: 18
+2026-11-11 14:41:46,980 [WARNING] Собрано меньше min_complexes=12: 10.
 
-CANDIDATES SELECTED: 9 / 12
-ACTIVE CAPACITY: 6 | RESERVE AVAILABLE: 3
+CANDIDATES SELECTED: 10 / 12
+FREE ACTIVE SLOTS: 0 | candidate pool may fill up to 0 slot(s), subject to the live entry-ratio condition
+RESERVE AFTER POSSIBLE SLOT-FILL: 10..10 candidate(s); exact count depends on which candidates meet the live entry signal
 WARNING: fewer than target 12 candidates; reserve is below target. This is an observed shortfall, not a forced fallback.
-01. JCTUSDT/ICNTUSDT/METUSDT <-> ERAUSDT/CYBERUSDT/INJUSDT | status=PASS | days=358.0 coverage=1.0 | corr=0.083 | spike_q75=0.848 dominant=ICNTUSDT (9/18 days) | excursion=3.852z recovery=42.0d | rank=4.575461025774666
-02. MAGMAUSDT/ESPORTSUSDT/BEAMUSDT <-> UAIUSDT/PARTIUSDT/BEATUSDT | status=PASS | days=319.0 coverage=1.0 | corr=0.012 | spike_q75=0.806 dominant=MAGMAUSDT (8/16 days) | excursion=3.913z recovery=25.0d | rank=1.3690204312375311
-03. WDCUSDT/BEAMUSDT/LITEUSDT <-> MEGAUSDT/B2USDT/MERLUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=166.0 coverage=1.0 | corr=0.297 | spike_q75=0.782 dominant=BEAMUSDT (5/9 days) | excursion=3.376z recovery=10.0d | rank=1.3379825553059075
-04. CYBERUSDT/ACTUSDT/FLYUSDT <-> B2USDT/AMDSTOCKUSDT/COHRUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=113.0 coverage=1.0 | corr=0.401 | spike_q75=0.613 dominant=ACTUSDT (2/6 days) | excursion=3.094z recovery=6.0d | rank=0.7955770554645317
-05. SNDKUSDT/MRVLUSDT/AAOIUSDT <-> HANAUSDT/EDGEUSDT/RKLBUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=154.0 coverage=1.0 | corr=0.394 | spike_q75=0.387 dominant=SNDKUSDT (5/8 days) | excursion=3.246z recovery=19.0d | rank=0.7715724595656425
-06. SOXLUSDT/MUUUSDT/KORUUSDT <-> UAIUSDT/BEATUSDT/LITEUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=117.0 coverage=1.0 | corr=0.247 | spike_q75=0.64 dominant=UAIUSDT (4/6 days) | excursion=3.011z recovery=16.0d | rank=0.768274348820915
-07. BLUAIUSDT/PURRUSDT/APRUSDT <-> BEUSDT/TQQQUSDT/ASTSUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=123.0 coverage=1.0 | corr=0.218 | spike_q75=0.914 dominant=APRUSDT (4/7 days) | excursion=2.86z recovery=10.0d | rank=0.38687768719160387
-08. DOSUSDT/QUSDT/PARTIUSDT <-> CBRSUSDT/EWYUSDT/SOXXUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=90.0 coverage=1.0 | corr=-0.038 | spike_q75=0.944 dominant=QUSDT (5/5 days) | excursion=2.784z recovery=16.0d | rank=0.30389652105305065
-09. NIULAIUSDT/SKHYNIXUSDT/DRAMUSDT <-> TQQQUSDT/SAMSUNGUSDT/ORDERUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=74.0 coverage=1.0 | corr=0.219 | spike_q75=0.964 dominant=NIULAIUSDT (2/4 days) | excursion=2.824z recovery=11.0d | rank=0.136922595257676
+01. JCTUSDT/ICNTUSDT/METUSDT <-> MEGAUSDT/INJUSDT/RSRUSDT | status=PASS | days=358.0 coverage=1.0 | corr=0.176 | spike_q75=0.864 dominant=ICNTUSDT (9/18 days) | excursion=3.851z recovery=39.0d | rank=4.716045856110108
+02. CYBERUSDT/BIRBUSDT/ACTUSDT <-> ERAUSDT/MEGAUSDT/B2USDT | status=REVIEW_INSUFFICIENT_HISTORY | days=286.0 coverage=1.0 | corr=0.385 | spike_q75=0.7 dominant=BIRBUSDT (6/15 days) | excursion=3.104z recovery=24.0d | rank=1.994757923732837
+03. MAGMAUSDT/ESPORTSUSDT/BEAMUSDT <-> UAIUSDT/PARTIUSDT/BEATUSDT | status=PASS | days=319.0 coverage=1.0 | corr=0.012 | spike_q75=0.806 dominant=MAGMAUSDT (8/16 days) | excursion=3.913z recovery=25.0d | rank=1.368263738035054
+04. ARXUSDT/ELSAUSDT/CLANKERUSDT <-> HANAUSDT/EDGEUSDT/MERLUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=140.0 coverage=1.0 | corr=0.206 | spike_q75=0.669 dominant=ELSAUSDT (4/7 days) | excursion=3.381z recovery=22.0d | rank=0.9345029532921971
+05. MUUUSDT/KORUUSDT/LITEUSDT <-> CYBERUSDT/ACTUSDT/FLYUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=113.0 coverage=1.0 | corr=0.3 | spike_q75=0.368 dominant=MUUUSDT (3/6 days) | excursion=2.939z recovery=7.0d | rank=0.8140602185094621
+06. SOXLUSDT/SNDKUSDT/WDCUSDT <-> BLUAIUSDT/APRUSDT/AAOIUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=154.0 coverage=1.0 | corr=0.26 | spike_q75=0.931 dominant=APRUSDT (4/8 days) | excursion=3.105z recovery=22.0d | rank=0.4836237028575041
+07. UAIUSDT/PARTIUSDT/BEATUSDT <-> SKHYNIXUSDT/APRUSDT/AAOIUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=154.0 coverage=1.0 | corr=-0.077 | spike_q75=0.866 dominant=UAIUSDT (5/8 days) | excursion=3.408z recovery=17.0d | rank=0.4156430280798008
+08. BEUSDT/SAMSUNGUSDT/ORDERUSDT <-> CRWVUSDT/NBISUSDT/AMDSTOCKUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=159.0 coverage=1.0 | corr=0.41 | spike_q75=0.632 dominant=NBISUSDT (2/8 days) | excursion=3.971z recovery=11.0d | rank=0.3129519549243882
+09. DELLUSDT/DRAMUSDT/PURRUSDT <-> CRDOUSDT/BEUSDT/ASTSUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=123.0 coverage=1.0 | corr=0.755 | spike_q75=0.6 dominant=PURRUSDT (5/7 days) | excursion=3.108z recovery=21.0d | rank=0.22612822525022722
+10. BLUAIUSDT/NIULAIUSDT/DELLUSDT <-> TQQQUSDT/ARMUSDT/SOXXUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=74.0 coverage=1.0 | corr=0.315 | spike_q75=0.907 dominant=NIULAIUSDT (4/4 days) | excursion=2.254z recovery=6.0d | rank=0.16262729656841274
 
 SAFETY: no trade session, private/account endpoints, order functions, state writes, or SQLite writes were used.
 Report saved: C:\Users\Admin\syntech_spread\dry_run_candidate_report.txt
