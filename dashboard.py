@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 from pybit.unified_trading import HTTP
 from typing import Dict, List, Tuple
@@ -45,7 +46,7 @@ if sys.platform == "win32":
 # КОНФИГ
 # ============================================================
 STATE_PATH = "state.json"
-DB_PATH = "bybit_1m.db"
+DB_PATH = r"C:\Users\Admin\bybit_1m.db"
 TRADES_DB = "trades.db"
 REFRESH_STATS_SEC = 10
 REFRESH_CHARTS_SEC = 30
@@ -138,240 +139,250 @@ def load_state() -> Dict:
 
 @st.cache_data(ttl=REFRESH_CHARTS_SEC)
 def get_trade_events(leg1: tuple, leg2: tuple, layers: List[Dict], d_max: float) -> List[Dict]:
-    if not os.path.exists(TRADES_DB) or not layers:
+    """Сопоставляет события текущего цикла слоям состояния по порядку."""
+    if not os.path.exists(TRADES_DB):
         return []
-
     complex_id = "|".join(list(leg1) + list(leg2))
-
     try:
         with sqlite3.connect(TRADES_DB, timeout=10) as conn:
             df = pd.read_sql_query(
-                "SELECT ts_ms, event FROM trades WHERE complex_id=? ORDER BY ts_ms ASC",
+                "SELECT ts_ms, event, details FROM trades WHERE complex_id=? ORDER BY ts_ms ASC, id ASC",
                 conn, params=(complex_id,)
             )
     except Exception as e:
         print(f"Ошибка чтения trades.db: {e}")
         return []
+    if df.empty:
+        return []
 
-    if df.empty: return []
-
-    current_cycle = []
+    cycle = []
     for _, row in df.iterrows():
-        if row['event'] == 'open':
-            current_cycle = [row]
-        elif row['event'] == 'add_layer' and current_cycle:
-            current_cycle.append(row)
-        elif row['event'] == 'close' and current_cycle:
-            current_cycle = []
-
-    if not current_cycle: return []
+        if row["event"] == "open":
+            cycle = [row]
+        elif row["event"] == "add_layer" and cycle:
+            cycle.append(row)
+        elif row["event"] == "close" and cycle:
+            cycle = []
+    if not cycle:
+        return []
 
     events = []
-    layer_idx = 0
-
-    for row in current_cycle:
-        if layer_idx >= len(layers): break
-        
-        layer = layers[layer_idx]
+    for idx, row in enumerate(cycle[:len(layers)]):
+        try:
+            details = json.loads(row.get("details") or "{}")
+        except (TypeError, ValueError):
+            details = {}
+        layer = layers[idx]
         qty = layer.get("qty", {})
         prices = layer.get("add_prices", {})
-        
-        # Используем сохраненный spread для точки на графике
-        sp_val = layer.get("spread", 0.0)
-        ratio_val = abs(sp_val) / d_max if d_max > 0 else 0.0
-        
-        parts = []
+        notionals = []
         for sym, q in qty.items():
-            p = prices.get(sym, 0.0)
-            if p == 0: 
-                p = FETCHER.prices.get(sym, 1.0)
-            val = q * p
-            parts.append(f"{sym.replace('USDT','')}:${val:.0f}")
-        
-        full_label = f"<b>ratio={ratio_val:.2f}</b> | <b>spread={sp_val:+.4f}</b> | " + " | ".join(parts)
-        short_label = str(layer_idx + 1)
-        
+            px = float(prices.get(sym, 0.0) or 0.0)
+            if px <= 0:
+                px = float(FETCHER.prices.get(sym, 0.0) or 0.0)
+            if px > 0:
+                notionals.append(f"{sym.replace('USDT', '')}: ${float(q) * px:,.0f}")
         events.append({
             "ts_ms": int(row["ts_ms"]),
-            "type": row["event"],
-            "layer_idx": layer_idx,
-            "short_label": short_label,
-            "full_label": full_label,
-            "spread": sp_val
+            "type": str(row["event"]),
+            "layer_idx": idx,
+            "label": "Вход" if idx == 0 else f"Добор {idx}",
+            "notionals": " · ".join(notionals),
+            "stored_spread": float(layer.get("spread", details.get("entry_spread", 0.0)) or 0.0),
+            "spread_snapshot": layer.get("spread_snapshot", {}),
+            "norm_refs": {},
+            "leg1": list(leg1),
+            "leg2": list(leg2),
+            "entry_spread": 0.0,
+            "d_max": float(d_max or 0.0),
         })
-        
-        layer_idx += 1
-
     return events
 
 
 @st.cache_data(ttl=REFRESH_CHARTS_SEC)
-def load_multi_chart_data_cached(leg1: tuple, leg2: tuple, entry_month_refs_tuple: tuple, entry_spread: float, open_ts: int) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    entry_month_refs = dict(entry_month_refs_tuple)
+def load_multi_chart_data_cached(leg1: tuple, leg2: tuple, entry_refs_tuple: tuple,
+                                 entry_spread: float, open_ts: int):
+    """Строит все периоды на одной нормировке и одном сдвиге относительно входа."""
+    refs = {str(k): float(v) for k, v in entry_refs_tuple if float(v or 0) > 0}
+    all_syms = list(dict.fromkeys(list(leg1) + list(leg2)))
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     month_ago = now_ms - 30 * 86400_000
-    all_syms = list(leg1) + list(leg2)
+    year_ago = now_ms - 365 * 86400_000
 
-    current_refs = get_month_refs_cached(tuple(all_syms))
-
-    def _query(sym, lo_ms, hi_ms):
+    def _query(symbol, timeframe, lo_ms, hi_ms):
         try:
-            with sqlite3.connect(DB_PATH) as conn:
+            with sqlite3.connect(DB_PATH, timeout=10) as conn:
                 return pd.read_sql_query(
-                    "SELECT timestamp, close FROM ohlcv WHERE symbol=? AND timeframe='1' "
+                    "SELECT timestamp, close FROM ohlcv WHERE symbol=? AND timeframe=? "
                     "AND timestamp BETWEEN ? AND ? ORDER BY timestamp",
-                    conn, params=(sym, lo_ms, hi_ms),
-                )
-        except Exception:
+                    conn, params=(symbol, timeframe, lo_ms, hi_ms))
+        except Exception as exc:
+            print(f"Ошибка чтения OHLCV {symbol}/{timeframe}: {exc}")
             return pd.DataFrame()
 
-    frames = {}
-    for sym in all_syms:
-        df = _query(sym, month_ago, now_ms)
-        if df.empty:
-            continue
-        frames[sym] = df.set_index("timestamp")["close"]
-
-    if len(frames) < len(all_syms):
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
-    pivot = pd.DataFrame(frames).sort_index().ffill()
-
-    if pivot.empty:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
-    def _process(slice_df, resample_rule):
-        if slice_df.empty: return pd.DataFrame()
-        
-        valid_df = slice_df.dropna()
-        if valid_df.empty: return pd.DataFrame()
-
-        # Нормализация (сначала entry_month_refs, если нет - current_refs)
-        for col in valid_df.columns:
-            ref = entry_month_refs.get(col)
+    def _build(timeframe, lo_ms, rule=None):
+        frames = {}
+        for sym in all_syms:
+            part = _query(sym, timeframe, lo_ms, now_ms)
+            if not part.empty:
+                frames[sym] = part.drop_duplicates("timestamp").set_index("timestamp")["close"]
+        if len(frames) != len(all_syms):
+            return pd.DataFrame()
+        raw = pd.DataFrame(frames).sort_index().ffill().dropna()
+        if raw.empty:
+            return pd.DataFrame()
+        # У одной и той же монеты во всех вкладках один базовый уровень.
+        # При отсутствии сохранённой базы используем первую точку общего ряда.
+        for sym in all_syms:
+            ref = refs.get(sym)
             if not ref or ref <= 0:
-                ref = current_refs.get(col)
-            if not ref or ref <= 0:
-                ref = valid_df[col].iloc[0]
-            valid_df[col] = valid_df[col] / ref
-
-        leg1_cols = [c for c in leg1 if c in valid_df.columns]
-        leg2_cols = [c for c in leg2 if c in valid_df.columns]
-
-        leg1_raw = valid_df[leg1_cols].mean(axis=1)
-        leg2_raw = valid_df[leg2_cols].mean(axis=1)
-        spread_raw = leg1_raw - leg2_raw
-
-        out = pd.DataFrame(index=valid_df.index)
-        out["leg1"] = leg1_raw
-        out["leg2"] = leg2_raw
-        out["spread"] = spread_raw
-
-        # Сначала делаем ресемплинг (усреднение)
-        if resample_rule:
-            out.index = pd.to_datetime(out.index, unit="ms", utc=True)
-            out = out.resample(resample_rule).mean().dropna()
-        else:
-            out.index = pd.to_datetime(out.index, unit="ms", utc=True)
-
-        # ★ МАТЕМАТИЧЕСКИЙ СДВИГ (OFFSET) ПРИМЕНЯЕМ ПОСЛЕ РЕСЕМПЛИНГА
-        if not out.empty:
-            open_dt = pd.to_datetime(open_ts, unit="ms", utc=True)
-            idx = out.index.get_indexer([open_dt], method='nearest')[0]
-            
-            if idx != -1:
-                s_plot = out["spread"].iloc[idx]
-                offset = entry_spread - s_plot
-                
-                out["leg1"] = out["leg1"] + offset / 2.0
-                out["leg2"] = out["leg2"] - offset / 2.0
-                out["spread"] = out["spread"] + offset
-
+                ref = float(raw[sym].iloc[0])
+            raw[sym] = raw[sym] / ref
+        n1, n2 = len(leg1), len(leg2)
+        if n1 == 0 or n2 == 0:
+            return pd.DataFrame()
+        out = pd.DataFrame(index=raw.index)
+        out["leg1"] = raw[list(leg1)].mean(axis=1)
+        out["leg2"] = raw[list(leg2)].mean(axis=1)
+        out["spread"] = out["leg1"] - out["leg2"]
+        out.index = pd.to_datetime(out.index, unit="ms", utc=True)
+        if rule:
+            # Берём последнее фактическое значение периода, а не среднее,
+            # чтобы закрытие бара совпадало с ценовой кривой на этом TF.
+            out = out.resample(rule).last().dropna()
+        if out.empty:
+            return out
+        open_dt = pd.to_datetime(open_ts, unit="ms", utc=True)
+        # Постоянный сдвиг для всех таймфреймов: сигнал первичного входа
+        # плюс изменение нормализованного спреда от сохранённой базы norm_refs.
+        offset = float(entry_spread)
+        out["leg1"] += offset / 2.0
+        out["leg2"] -= offset / 2.0
+        out["spread"] += offset
         return out
 
-    df_month = _process(pivot, '1h')
-    day_ago = now_ms - 24 * 3600_000
-    df_day = _process(pivot[pivot.index >= day_ago], '5min')
-    hour_ago = now_ms - 3600_000
-    df_hour = _process(pivot[pivot.index >= hour_ago], None)
+    year = _build("60", year_ago)
+    month = _build("1", month_ago, "1h")
+    day = _build("1", now_ms - 24 * 3600_000, "5min")
+    hour = _build("1", now_ms - 3600_000)
+    return year, month, day, hour
 
-    return df_month, df_day, df_hour
+
+def _event_value(df: pd.DataFrame, timestamp_ms: int):
+    """Значение той же кривой на точном времени события (интерполяция между барами)."""
+    if df.empty:
+        return None
+    dt = pd.to_datetime(timestamp_ms, unit="ms", utc=True)
+    series = df["spread"].dropna()
+    if series.empty or dt < series.index.min() or dt > series.index.max():
+        return None
+    augmented = series.reindex(series.index.union([dt])).sort_index().interpolate(method="time")
+    value = augmented.get(dt)
+    return float(value) if pd.notna(value) else None
 
 
 def plot_chart(df: pd.DataFrame, title: str, chart_key: str, events: List[Dict]):
-    if df.empty: return
-    
-    ts = df.index
-    fig = go.Figure()
-    
-    fig.add_trace(go.Scatter(x=ts, y=df["leg1"], name="leg1", line=dict(color="#1f77b4", width=1.6)))
-    fig.add_trace(go.Scatter(x=ts, y=df["leg2"], name="leg2", line=dict(color="#ff7f0e", width=1.6)))
-    fig.add_trace(go.Scatter(x=ts, y=df["spread"], name="spread", line=dict(color="#2ca02c", width=1.6, dash="dot"), yaxis="y2"))
+    if df.empty:
+        st.info("Для выбранного периода недостаточно совместных данных по всем ногам.")
+        return
 
-    df_min_ts = ts.min()
-    df_max_ts = ts.max()
-    
-    visible_events = []
-    if events:
-        for ev in events:
-            ev_ts = pd.to_datetime(ev["ts_ms"], unit="ms", utc=True)
-            if df_min_ts <= ev_ts <= df_max_ts:
-                visible_events.append(ev)
-                is_open = ev["type"] == "open"
-                color = "#00cc96" if is_open else "#ff7f0e"
-                
-                fig.add_vline(
-                    x=ev_ts,
-                    line_width=1.5,
-                    line_dash="dash",
-                    line_color=color,
-                    layer="above",
-                    annotation_text=f"<b>{ev['short_label']}</b>",
-                    annotation_position="top",
-                    annotation_font=dict(size=12, color="white"),
-                    annotation_bgcolor=color,
-                    annotation_borderpad=4
-                )
-                
-                fig.add_trace(go.Scatter(
-                    x=[ev_ts], y=[ev["spread"]],
-                    mode="markers",
-                    name=f"{ev['short_label']} ({'Вход' if is_open else 'Добор'})",
-                    marker=dict(size=12, color=color, symbol="circle", line=dict(color="white", width=1.5)),
-                    showlegend=False,
-                    yaxis="y2",
-                    hovertemplate=(
-                        f"<b>{ev['short_label']} ({'Вход' if is_open else 'Добор'})</b><br>"
-                        f"Spread: {ev['spread']:+.4f}<br>"
-                        f"{ev['full_label']}<extra></extra>"
-                    )
-                ))
-
-    date_range = f"{df_min_ts.strftime('%d.%m %H:%M')} - {df_max_ts.strftime('%d.%m %H:%M')}"
-    
-    fig.update_layout(
-        title=f"{title} (Данные: {date_range})",
-        height=350, 
-        margin=dict(l=10, r=10, t=40, b=10),
-        hovermode="x unified",
-        yaxis=dict(title="leg (norm)", gridcolor="#eee"),
-        yaxis2=dict(title="spread", overlaying="y", side="right", showgrid=False, zeroline=True, zerolinecolor="#aaa"),
-        legend=dict(orientation="h", y=1.1, x=0),
-        plot_bgcolor="#fafafa",
+    # Цены и spread намеренно на отдельных панелях: spread не маскируется
+    # масштабом нормализованных цен и не выглядит как касание кривых.
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
+        row_heights=[0.66, 0.34],
+        subplot_titles=("Средние нормализованные цены ног", "Спред Leg 1 − Leg 2"),
     )
-    fig.add_hline(y=0, line_dash="dash", line_color="#888", yref="y2")
-    
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["leg1"], name="Среднее норм. Leg 1",
+        line=dict(color="#2878B5", width=1.7),
+    ), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["leg2"], name="Среднее норм. Leg 2",
+        line=dict(color="#E87524", width=1.7),
+    ), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["spread"], name="Спред Leg1 − Leg2",
+        line=dict(color="#238636", width=2), fill="tozeroy",
+        fillcolor="rgba(35,134,54,0.10)",
+    ), row=2, col=1)
+
+    visible = []
+    last_event_spread = None
+    for ev in events:
+        ev_dt = pd.to_datetime(ev["ts_ms"], unit="ms", utc=True)
+        # Не расширять ось времени событием вне периода графика. Иначе на
+        # вкладке последнего часа маркер старого входа оказывается в пустоте.
+        if ev_dt < df.index.min() or ev_dt > df.index.max():
+            continue
+        # Событие использует ценовой snapshot слоя, сохранённый ботом.
+        snapshot = ev.get("spread_snapshot", {})
+        norm_refs = ev.get("norm_refs", {})
+        raw_snapshot_spread = None
+        if snapshot and norm_refs:
+            try:
+                v1 = [float(snapshot[s]) / float(norm_refs[s]) for s in ev["leg1"]]
+                v2 = [float(snapshot[s]) / float(norm_refs[s]) for s in ev["leg2"]]
+                if all(x > 0 for x in v1 + v2):
+                    raw_snapshot_spread = sum(v1) / len(v1) - sum(v2) / len(v2)
+            except (KeyError, TypeError, ValueError, ZeroDivisionError):
+                pass
+        curve_value = _event_value(df, ev["ts_ms"])
+        value = (float(ev["entry_spread"]) + raw_snapshot_spread
+                 if raw_snapshot_spread is not None else curve_value)
+        if value is None:
+            continue
+
+        is_open = ev["type"] == "open"
+        color = "#00a878" if is_open else "#e87524"
+        delta = None if last_event_spread is None else value - last_event_spread
+        ratio = abs(value) / ev["d_max"] if ev["d_max"] > 0 else 0.0
+        ev["chart_spread"] = value
+        ev["delta_from_previous"] = delta
+        ev["ratio"] = ratio
+        visible.append(ev)
+        last_event_spread = value
+
+        # Вертикаль связывает событие с ценовыми кривыми; кружок же расположен
+        # только на отдельной оси спреда и показывает его реальную величину.
+        fig.add_vline(x=ev_dt, line_width=1.2, line_dash="dash", line_color=color,
+                      opacity=0.8, row="all", col=1)
+        fig.add_trace(go.Scatter(
+            x=[ev_dt], y=[value], mode="markers+text", text=[str(ev["layer_idx"] + 1)],
+            textposition="top center", name=f"{ev['label']} · S {value:+.5f}",
+            marker=dict(size=12, color=color, symbol="circle", line=dict(color="white", width=1.5)),
+            customdata=[[ev["label"], value, ratio,
+                         delta if delta is not None else 0.0, ev["notionals"]]],
+            hovertemplate=("<b>%{customdata[0]}</b><br>Спред при событии: %{customdata[1]:+.5f}"
+                           "<br>|S| / D-max: %{customdata[2]:.2f}"
+                           "<br>Изменение к предыдущему событию: %{customdata[3]:+.5f}"
+                           "<br>%{customdata[4]}<br>%{x|%d.%m.%Y %H:%M:%S UTC}<extra></extra>"),
+        ), row=2, col=1)
+
+    date_range = f"{df.index.min():%d.%m.%Y %H:%M} — {df.index.max():%d.%m.%Y %H:%M} UTC"
+    fig.update_layout(
+        title=f"{title} · {date_range}", height=560,
+        margin=dict(l=25, r=25, t=80, b=25), hovermode="x unified",
+        legend=dict(orientation="h", y=1.08, x=0), plot_bgcolor="#fafafa",
+    )
+    fig.update_yaxes(title_text="Средняя нормализованная цена", gridcolor="#e8e8e8", row=1, col=1)
+    fig.update_yaxes(title_text="Спред (значение события)", zeroline=True,
+                     zerolinecolor="#777", gridcolor="#e8e8e8", row=2, col=1)
+    fig.add_hline(y=0, line_dash="dash", line_color="#888", row=2, col=1)
     st.plotly_chart(fig, width="stretch", key=chart_key)
-    
-    if visible_events:
-        legend_html = "<div style='background-color: #f8f9fa; padding: 10px; border-radius: 5px; border: 1px solid #e9ecef; font-family: monospace; font-size: 13px;'>"
-        for ev in visible_events:
-            is_open = ev["type"] == "open"
-            color = "#00cc96" if is_open else "#ff7f0e"
-            type_str = "Вход" if is_open else "Добор"
-            legend_html += f"<span style='color:{color}; font-weight:bold;'>■ {ev['short_label']} ({type_str})</span>: {ev['full_label']}<br>"
-        legend_html += "</div>"
-        st.markdown(legend_html, unsafe_allow_html=True)
+
+    if visible:
+        rows = ["<div style='background:#f8f9fa;padding:10px;border-radius:6px;border:1px solid #e9ecef;font-family:monospace;font-size:13px'>"]
+        for ev in visible:
+            color = "#00a878" if ev["type"] == "open" else "#e87524"
+            change = "первичный вход" if ev["delta_from_previous"] is None else f"изменение к прошлому событию {ev['delta_from_previous']:+.5f}"
+            rows.append(f"<div style='color:{color};font-weight:600'>● {ev['layer_idx'] + 1}. {ev['label']}: "
+                        f"S={ev['chart_spread']:+.5f} · |S|/D-max={ev['ratio']:.2f} · {change} "
+                        f"· {datetime.fromtimestamp(ev['ts_ms']/1000, timezone.utc):%d.%m.%Y %H:%M:%S UTC}</div>")
+            if ev["notionals"]:
+                rows.append(f"<div style='padding:0 0 5px 18px;color:#555'>{ev['notionals']}</div>")
+        rows.append("</div>")
+        st.markdown("".join(rows), unsafe_allow_html=True)
 
 
 # ============================================================
@@ -443,16 +454,19 @@ def complex_net_pnl(cs: Dict, prices: Dict[str, float], taker_rate: float) -> fl
 
 def complex_spread_now(cs: Dict, prices: Dict[str, float]) -> float:
     syms = list(cs["complex"]["leg1"]) + list(cs["complex"]["leg2"])
-    refs_month = get_month_refs_cached(tuple(syms))
-    if len(refs_month) < 6:
+    n1 = len(cs["complex"]["leg1"])
+    n2 = len(cs["complex"]["leg2"])
+    if n1 == 0 or n2 == 0:
         return 0.0
-
+    refs = cs.get("entry_month_refs", {}) or get_month_refs_cached(tuple(syms))
     vals = []
     for sym in syms:
-        p = prices.get(sym, 0.0)
-        ref = refs_month.get(sym, p)
-        vals.append(p / ref if ref > 0 else 1.0)
-    return sum(vals[:3]) / 3 - sum(vals[3:]) / 3
+        p = float(prices.get(sym, 0.0) or 0.0)
+        ref = float(refs.get(sym, 0.0) or 0.0)
+        if p <= 0 or ref <= 0:
+            return 0.0
+        vals.append(p / ref)
+    return float(cs.get("entry_spread", 0.0)) + sum(vals[:n1]) / n1 - sum(vals[n1:]) / n2
 
 
 # ============================================================
@@ -593,86 +607,55 @@ def render_stats():
 def render_charts():
     state = load_state()
     active: List[Dict] = state.get("active", [])
-
     if not active:
         return
-
     with FETCHER.lock:
-        prices = FETCHER.prices
-
+        prices = dict(FETCHER.prices)
     st.divider()
-    st.subheader("Графики нормализованных цен")
-    
-    taker_rate = 0.00055
-
+    st.subheader("История спреда и фактические моменты входа / доборов")
+    st.caption("Dashboard build: 2026-11-06-spread-panel-v2 · верхняя панель — нормализованные цены; нижняя — величина спреда и события. Вкладка года использует часовые свечи.")
     for i, cs in enumerate(active, 1):
         leg1 = tuple(cs["complex"]["leg1"])
         leg2 = tuple(cs["complex"]["leg2"])
         title = f"#{i} · {' / '.join(leg1)} ⟷ {' / '.join(leg2)}"
-
-        pnl_net = complex_net_pnl(cs, prices, taker_rate)
-        pnl_gross = complex_gross_pnl(cs, prices)
-        target = cs.get("target", 0)
-
+        key_id = str(cs.get("id") or "|".join(leg1 + leg2)).replace(" ", "_")
         col_title, col_toggle = st.columns([4, 1])
         with col_title:
             st.markdown(f"**{title}**")
         with col_toggle:
-            show_chart = st.toggle("Показать график", key=f"tg_{i}")
-
-        if show_chart:
-            st.markdown(
-                f"<div style='font-size: 16px; margin-bottom: 10px;'>"
-                f"Net PnL: <b>${pnl_net:.2f}</b> | "
-                f"Gross PnL: <b>${pnl_gross:.2f}</b> | "
-                f"Target: <b>${target:.2f}</b>"
-                f"</div>",
-                unsafe_allow_html=True
-            )
-
-            entry_month_refs = cs.get("entry_month_refs", {})
-            entry_month_refs_tuple = tuple(entry_month_refs.items())
-            entry_spread_val = float(cs.get("entry_spread", 0.0))
-            
-            d_max_val = float(cs.get("complex", {}).get("d_max", 0.0))
-            events = get_trade_events(leg1, leg2, cs.get("layers", []), d_max_val)
-            
-            # ★ Передаем время входа для точного сдвига графика
-            open_ts = events[0]["ts_ms"] if events else int(time.time() * 1000)
-
-            df_month, df_day, df_hour = load_multi_chart_data_cached(
-                leg1, leg2, entry_month_refs_tuple, entry_spread_val, open_ts
-            )
-
-            tab_m, tab_d, tab_h = st.tabs(["📅 Месяц (1ч)", "☀️ День (5м)", "⏱️ Час (1м)"])
-
-            with tab_m:
-                if df_month.empty:
-                    st.info("Нет данных за месяц")
-                else:
-                    plot_chart(df_month, f"Месяц (реальный спред, 1ч)", f"chart_{i}_month", events)
-
-            with tab_d:
-                if df_day.empty:
-                    st.info("Нет данных за день")
-                else:
-                    plot_chart(df_day, f"День (реальный спред, 5м)", f"chart_{i}_day", events)
-
-            with tab_h:
-                if df_hour.empty:
-                    st.info("Нет данных за час")
-                else:
-                    plot_chart(df_hour, f"Часы (реальный спред, 1м)", f"chart_{i}_hour", events)
-
-            if not df_hour.empty:
-                col1, col2, col3, col4 = st.columns(4)
-                cur_S = df_hour["spread"].iloc[-1]
-                entry_S = cs.get("entry_spread", 0)
-                col1.metric("Текущий спред", f"{cur_S:+.4f}", delta=f"{(cur_S - entry_S):+.4f} от входа")
-                col2.metric("Слоёв в позиции", len(cs.get("layers", [])))
-                col3.metric("Реализовано", f"${cs.get('realized_pnl', 0):.2f}")
-                col4.metric("Хедж", "🛡 открыт" if cs.get("hedge_open") else "—")
-            st.divider()
+            show_chart = st.toggle("Показать график", key=f"tg_{key_id}")
+        if not show_chart:
+            continue
+        pnl_net = complex_net_pnl(cs, prices, 0.00055)
+        pnl_gross = complex_gross_pnl(cs, prices)
+        st.markdown(
+            f"Net PnL: **{pnl_net:+.2f} USD** · "
+            f"Gross PnL: **{pnl_gross:+.2f} USD** · "
+            f"Target: **{float(cs.get('target', 0)):.2f} USD**"
+        )
+        refs = cs.get("norm_refs", {}) or cs.get("entry_month_refs", {}) or {}
+        layers = cs.get("layers", [])
+        events = get_trade_events(leg1, leg2, layers, float(cs.get("complex", {}).get("d_max", 0.0)))
+        chart_refs = cs.get("norm_refs", {}) or cs.get("entry_month_refs", {}) or {}
+        for ev in events:
+            ev["norm_refs"] = chart_refs
+            ev["entry_spread"] = float(cs.get("entry_spread", 0.0))
+        open_ts = events[0]["ts_ms"] if events else int(time.time() * 1000)
+        year, month, day, hour = load_multi_chart_data_cached(
+            leg1, leg2, tuple(sorted(refs.items())), float(cs.get("entry_spread", 0.0)), open_ts)
+        tab_y, tab_m, tab_d, tab_h = st.tabs(["📈 Год (1ч)", "📅 Месяц (1ч)", "☀️ День (5м)", "⏱️ Час (1м)"])
+        with tab_y:
+            plot_chart(year, "Год · часовые свечи", f"chart_{key_id}_year", events)
+        with tab_m:
+            plot_chart(month, "Месяц · часовые свечи", f"chart_{key_id}_month", events)
+        with tab_d:
+            plot_chart(day, "День · 5-минутные бары", f"chart_{key_id}_day", events)
+        with tab_h:
+            plot_chart(hour, "Час · минутные свечи", f"chart_{key_id}_hour", events)
+        if not hour.empty:
+            st.metric("Текущий спред", f"{hour['spread'].iloc[-1]:+.5f}",
+                      delta=f"{hour['spread'].iloc[-1] - float(cs.get('entry_spread', 0)):+.5f} от входа")
+        st.divider()
 
 
 # ============================================================
