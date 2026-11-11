@@ -1,33 +1,35 @@
 SPREAD BOT CANDIDATE SELECTION — READ-ONLY DRY RUN
-Generated UTC: 2026-11-11 11:33:14
+Generated UTC: 2026-11-11 11:53:17
 Bot: C:\Users\Admin\syntech_spread\syntech_spread_v6_roi_levels.py
 Database (SQLite read-only): C:\Users\Admin\bybit_1m.db
 State (read-only): C:\Users\Admin\state.json
 Bybit access: public market-data GET only; no account/private endpoints or orders
 Candidate-pool target: 12 | maximum active complexes: 6
 
-Symbols passing public liquidity/volatility screening: 221
+Symbols passing public liquidity/volatility screening: 220
 Active symbols/directions loaded from state.json: 36
 Active complexes in state.json: 6/6
-Universe symbols after active-exposure limit: 221
-1m pivot: 221 symbols, 14326 aligned bars
-After pump/dump filtering: 179 symbols
-Cached D data: 179 symbols, 364 dates; missing data will be REVIEW/penalized, not fetched
+Universe symbols after active-exposure limit: 220
+1m pivot: 220 symbols, 14326 aligned bars
+After pump/dump filtering: 176 symbols
+Cached D data: 176 symbols, 364 dates; missing data will be REVIEW/penalized, not fetched
 Building candidates with bot.build_complexes(...); this may take a few minutes.
 
-CANDIDATES SELECTED: 10 / 12
+DIRECTION-AWARE CANDIDATES SELECTED: 10 / 12
+CANDIDATES REUSING ACTIVE SYMBOLS: 7 (builder allows only if build-time direction and usage limits pass)
+CURRENT BOT BLANKET-FILTER WOULD RETAIN: 3 / 10; it drops all overlapping symbols regardless of side
 FREE ACTIVE SLOTS: 0 | candidate pool may fill up to 0 slot(s), subject to the live entry-ratio condition
-RESERVE AFTER POSSIBLE SLOT-FILL: 10..10 candidate(s); exact count depends on which candidates meet the live entry signal
-WARNING: fewer than target 12 candidates; reserve is below target. This is an observed shortfall, not a forced fallback.
-01. JCTUSDT/ICNTUSDT/METUSDT <-> MEGAUSDT/INJUSDT/RSRUSDT | status=PASS | days=358.0 coverage=1.0 | corr=0.176 | spike_q75=0.864 dominant=ICNTUSDT (9/18 days) | excursion=3.851z recovery=39.0d | rank=4.716045856110108
-02. CYBERUSDT/BIRBUSDT/ACTUSDT <-> ERAUSDT/MEGAUSDT/B2USDT | status=REVIEW_INSUFFICIENT_HISTORY | days=286.0 coverage=1.0 | corr=0.385 | spike_q75=0.7 dominant=BIRBUSDT (6/15 days) | excursion=3.104z recovery=24.0d | rank=1.994757923732837
-03. MAGMAUSDT/ESPORTSUSDT/BEAMUSDT <-> UAIUSDT/PARTIUSDT/BEATUSDT | status=PASS | days=319.0 coverage=1.0 | corr=0.012 | spike_q75=0.806 dominant=MAGMAUSDT (8/16 days) | excursion=3.913z recovery=25.0d | rank=1.368263738035054
-04. ARXUSDT/ELSAUSDT/CLANKERUSDT <-> HANAUSDT/EDGEUSDT/MERLUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=140.0 coverage=1.0 | corr=0.206 | spike_q75=0.669 dominant=ELSAUSDT (4/7 days) | excursion=3.381z recovery=22.0d | rank=0.9345029532921971
-05. MUUUSDT/KORUUSDT/LITEUSDT <-> CYBERUSDT/ACTUSDT/FLYUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=113.0 coverage=1.0 | corr=0.3 | spike_q75=0.368 dominant=MUUUSDT (3/6 days) | excursion=2.939z recovery=7.0d | rank=0.8140602185094621
-06. SOXLUSDT/SNDKUSDT/WDCUSDT <-> BLUAIUSDT/APRUSDT/AAOIUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=154.0 coverage=1.0 | corr=0.26 | spike_q75=0.931 dominant=APRUSDT (4/8 days) | excursion=3.105z recovery=22.0d | rank=0.4836237028575041
-07. UAIUSDT/PARTIUSDT/BEATUSDT <-> SKHYNIXUSDT/APRUSDT/AAOIUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=154.0 coverage=1.0 | corr=-0.077 | spike_q75=0.866 dominant=UAIUSDT (5/8 days) | excursion=3.408z recovery=17.0d | rank=0.4156430280798008
-08. BEUSDT/SAMSUNGUSDT/ORDERUSDT <-> CRWVUSDT/NBISUSDT/AMDSTOCKUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=159.0 coverage=1.0 | corr=0.41 | spike_q75=0.632 dominant=NBISUSDT (2/8 days) | excursion=3.971z recovery=11.0d | rank=0.3129519549243882
-09. DELLUSDT/DRAMUSDT/PURRUSDT <-> CRDOUSDT/BEUSDT/ASTSUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=123.0 coverage=1.0 | corr=0.755 | spike_q75=0.6 dominant=PURRUSDT (5/7 days) | excursion=3.108z recovery=21.0d | rank=0.22612822525022722
-10. BLUAIUSDT/NIULAIUSDT/DELLUSDT <-> TQQQUSDT/ARMUSDT/SOXXUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=74.0 coverage=1.0 | corr=0.315 | spike_q75=0.907 dominant=NIULAIUSDT (4/4 days) | excursion=2.254z recovery=6.0d | rank=0.16262729656841274
+DIRECTION-AWARE CANDIDATE POOL AFTER POSSIBLE SLOT-FILL: 10..10; exact count depends on live entry signal
+WARNING: direction-aware pool has 10 candidates; configured target is 12.
+01. JCTUSDT/ICNTUSDT/METUSDT <-> MEGAUSDT/B2USDT/1000PEPEPERP | active_overlap=none | current_code=KEEP | status=PASS | days=358.0 coverage=1.0 | corr=0.158 | spike_q75=0.842 dominant=ICNTUSDT (10/18 days) | excursion=3.79z recovery=27.0d | rank=5.345727525453893
+02. BIRBUSDT/CYBERUSDT/ACTUSDT <-> ERAUSDT/MEGAUSDT/B2USDT | active_overlap=BIRBUSDT | current_code=BLANKET_DROP | status=REVIEW_INSUFFICIENT_HISTORY | days=286.0 coverage=1.0 | corr=0.385 | spike_q75=0.7 dominant=BIRBUSDT (6/15 days) | excursion=3.104z recovery=24.0d | rank=1.9901836381476095
+03. MAGMAUSDT/ESPORTSUSDT/APRUSDT <-> UAIUSDT/PARTIUSDT/BEATUSDT | active_overlap=none | current_code=KEEP | status=PASS | days=319.0 coverage=1.0 | corr=-0.025 | spike_q75=0.87 dominant=MAGMAUSDT (8/16 days) | excursion=3.823z recovery=26.0d | rank=1.3284819735775715
+04. ARXUSDT/ELSAUSDT/CLANKERUSDT <-> HANAUSDT/EDGEUSDT/MERLUSDT | active_overlap=CLANKERUSDT,EDGEUSDT,ELSAUSDT,HANAUSDT,MERLUSDT | current_code=BLANKET_DROP | status=REVIEW_INSUFFICIENT_HISTORY | days=140.0 coverage=1.0 | corr=0.206 | spike_q75=0.669 dominant=ELSAUSDT (4/7 days) | excursion=3.381z recovery=22.0d | rank=0.998804951931804
+05. MUUUSDT/KORUUSDT/LITEUSDT <-> CYBERUSDT/ACTUSDT/FLYUSDT | active_overlap=none | current_code=KEEP | status=REVIEW_INSUFFICIENT_HISTORY | days=113.0 coverage=1.0 | corr=0.3 | spike_q75=0.368 dominant=MUUUSDT (3/6 days) | excursion=2.939z recovery=7.0d | rank=0.8234497076317356
+06. SOXLUSDT/MRVLUSDT/WDCUSDT <-> AGIUSDT/ENAUSDT/SIGNUSDT | active_overlap=ENAUSDT,MRVLUSDT,SOXLUSDT,WDCUSDT | current_code=BLANKET_DROP | status=REVIEW_INSUFFICIENT_HISTORY | days=166.0 coverage=1.0 | corr=0.289 | spike_q75=0.505 dominant=ENAUSDT (4/9 days) | excursion=3.189z recovery=20.0d | rank=0.6184755186340676
+07. BLUAIUSDT/ORDERUSDT/DRAMUSDT <-> NBISUSDT/BEUSDT/ARMUSDT | active_overlap=NBISUSDT,ORDERUSDT | current_code=BLANKET_DROP | status=REVIEW_INSUFFICIENT_HISTORY | days=166.0 coverage=1.0 | corr=0.249 | spike_q75=0.938 dominant=BLUAIUSDT (5/9 days) | excursion=3.565z recovery=11.0d | rank=0.47001902232864573
+08. BEUSDT/SAMSUNGUSDT/ARMUSDT <-> CRCLUSDT/SIGNUSDT/BMNRUSDT | active_overlap=SAMSUNGUSDT | current_code=BLANKET_DROP | status=REVIEW_INSUFFICIENT_HISTORY | days=159.0 coverage=1.0 | corr=0.437 | spike_q75=0.434 dominant=BEUSDT (4/8 days) | excursion=3.114z recovery=20.0d | rank=0.4372502982541499
+09. UAIUSDT/PARTIUSDT/BEATUSDT <-> SKHYNIXUSDT/APRUSDT/AAOIUSDT | active_overlap=SKHYNIXUSDT | current_code=BLANKET_DROP | status=REVIEW_INSUFFICIENT_HISTORY | days=154.0 coverage=1.0 | corr=-0.077 | spike_q75=0.866 dominant=UAIUSDT (5/8 days) | excursion=3.408z recovery=17.0d | rank=0.4232431476060161
+10. CRDOUSDT/SKHYUSDT/ASTSUSDT <-> CRWVUSDT/CBRSUSDT/EWYUSDT | active_overlap=ASTSUSDT,SKHYUSDT | current_code=BLANKET_DROP | status=REVIEW_INSUFFICIENT_HISTORY | days=122.0 coverage=1.0 | corr=0.889 | spike_q75=0.455 dominant=CRWVUSDT (3/7 days) | excursion=2.685z recovery=16.0d | rank=0.26802853264857734
 
-SAFETY: no trade session, private/account endpoints, order functions, state writes, or SQLite writes were used.
+SAFETY: no trade session, private/account endpoints, order functions, state writes, or SQLite writes were used. Directional eligibility is evaluated at build time; fill_free_slots rechecks direction at entry. Running bot state is not changed.
