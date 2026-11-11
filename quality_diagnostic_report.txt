@@ -1,0 +1,159 @@
+ACTIVE COMPLEX QUALITY DIAGNOSTIC
+Generated UTC: 2026-11-11 06:35:59
+Bot script: C:\Users\Admin\syntech_spread\syntech_spread_v6_roi_levels.py
+State: C:\Users\Admin\state.json
+SQLite DB: C:\Users\Admin\bybit_1m.db
+Annual timeframe: D; requested history: 365 days
+Read-only: no exchange API calls and no orders sent.
+Ranking scores are diagnostic estimates; only the three new annual checks are compared here.
+
+SUMMARY (risk-ranked)
+1. #2 ASTSUSDT/NIULAIUSDT/SKHYUSDT <-> HIMSUSDT/LSKUSDT/2ZUSDT | layers=1 | quality=REJECT: single_leg_spike_share=0.945>0.90 | factor=0.15 | score old/new=0.30591494123156765/0.30591494123156765
+2. #4 SKHYNIXUSDT/MUUSDT/MRVLUSDT <-> PONSUSDT/XPLUSDT/PURRUSDT | layers=1 | quality=REJECT: single_leg_spike_share=0.955>0.90 | factor=0.15 | score old/new=0.3758810251659514/0.2824757203150937
+3. #6 ENAUSDT/MARSCOINUSDT/PENGUUSDT <-> QUSDT/CRCLUSDT/BMNRUSDT | layers=1 | quality=REJECT: single_leg_spike_share=0.987>0.90 | factor=0.15 | score old/new=0.4692890310036151/0.4692890310036151
+4. #1 JCTUSDT/ICNTUSDT/ERAUSDT <-> HAEDALUSDT/BMTUSDT/BEATUSDT | layers=4 | quality=REJECT: single_leg_spike_share=0.954>0.90 | factor=0.1934 | score old/new=2.9445410986587826/2.51979755964871
+5. #3 GRASSUSDT/SAMSUNGUSDT/ORDERUSDT <-> NBISUSDT/AMDSTOCKUSDT/TSLAUSDT | layers=1 | quality=REJECT: single_leg_spike_share=0.954>0.90 | factor=0.2679 | score old/new=0.8313510216045591/0.4978071942062168
+6. #5 STONKUSDT/ESPORTSUSDT/EVAAUSDT <-> PIEVERSEUSDT/CLANKERUSDT/LYNUSDT | layers=1 | quality=PASS | factor=0.65 | score old/new=10.604826632228738/6.8931373109486795
+
+DETAILS
+========================================================================================
+Complex #2: ASTSUSDT/NIULAIUSDT/SKHYUSDT <-> HIMSUSDT/LSKUSDT/2ZUSDT
+layers=1 | entry_spread=0.10511960327411607 | current state target=1.0 | leg1_long=False
+saved score=1.718366936314474 | d_max=0.11807513786742785 | cycles=66
+annual_status=partial | annual_days=73.0 | coverage=1.0
+increment_corr min/30d/90d/180d: -0.089 / 0.274 / -0.089 / None
+extreme_single_leg_share=0.945
+max_excursion_z=2.745 | max_recovery_days=3.0
+stability_factor old/new=0.15 / 0.15
+raw_score=2.0394329415437844
+estimated_rank old/new=0.30591494123156765 / 0.30591494123156765
+quality_gate=REJECT: single_leg_spike_share=0.945>0.90
+state.last_spread_snapshot={'ASTSUSDT': 33.6, 'NIULAIUSDT': 0.05668, 'SKHYUSDT': 129.61, 'HIMSUSDT': 18.85, 'LSKUSDT': 0.16423, '2ZUSDT': 0.01937}
+state.last_add_prices={'ASTSUSDT': 33.55, 'NIULAIUSDT': 0.05656, 'SKHYUSDT': 129.49, 'HIMSUSDT': 18.95, 'LSKUSDT': 0.16405, '2ZUSDT': 0.01934}
+state.last_grid_level=0
+state.grid_level_index=0
+state.realized_pnl=0.0
+state.fees_paid=0.38421827
+state.close_pending=False
+state.fill_reconciliation_required=False
+layers detail:
+  layer 1: {"add_prices": {"2ZUSDT": 0.01934, "ASTSUSDT": 33.55, "HIMSUSDT": 18.95, "LSKUSDT": 0.16405, "NIULAIUSDT": 0.05656, "SKHYUSDT": 129.49}, "qty": {"2ZUSDT": 5167.0, "ASTSUSDT": 2.98, "HIMSUSDT": 5.27, "LSKUSDT": 609.6, "NIULAIUSDT": 1760.0, "SKHYUSDT": 0.77}, "spread": 0.10511960327411607, "spread_snapshot": {"2ZUSDT": 0.01937, "ASTSUSDT": 33.6, "HIMSUSDT": 18.85, "LSKUSDT": 0.16423, "NIULAIUSDT": 0.05668, "SKHYUSDT": 129.61}}
+
+========================================================================================
+Complex #4: SKHYNIXUSDT/MUUSDT/MRVLUSDT <-> PONSUSDT/XPLUSDT/PURRUSDT
+layers=1 | entry_spread=0.10699248294824093 | current state target=1.0 | leg1_long=False
+saved score=1.3557455686541549 | d_max=0.10510753453001309 | cycles=85
+annual_status=partial | annual_days=71.0 | coverage=1.0
+increment_corr min/30d/90d/180d: 0.352 / 0.601 / 0.352 / None
+extreme_single_leg_share=0.955
+max_excursion_z=2.144 | max_recovery_days=19.0
+stability_factor old/new=0.1996 / 0.15
+raw_score=1.8831714687672916
+estimated_rank old/new=0.3758810251659514 / 0.2824757203150937
+quality_gate=REJECT: single_leg_spike_share=0.955>0.90
+state.last_spread_snapshot={'SKHYNIXUSDT': 947.68, 'MUUSDT': 755.8, 'MRVLUSDT': 162.27, 'PONSUSDT': 0.1524, 'XPLUSDT': 0.05276, 'PURRUSDT': 8.748}
+state.last_add_prices={'SKHYNIXUSDT': 948.5, 'MUUSDT': 756.36, 'MRVLUSDT': 162.3, 'PONSUSDT': 0.1524, 'XPLUSDT': 0.05275, 'PURRUSDT': 8.748}
+state.last_grid_level=0
+state.grid_level_index=0
+state.realized_pnl=0.0
+state.fees_paid=0.27383588000000003
+state.close_pending=False
+state.fill_reconciliation_required=False
+layers detail:
+  layer 1: {"add_prices": {"MRVLUSDT": 162.3, "MUUSDT": 756.36, "PONSUSDT": 0.1524, "PURRUSDT": 8.748, "SKHYNIXUSDT": 948.5, "XPLUSDT": 0.05275}, "qty": {"MRVLUSDT": 0.61, "MUUSDT": 0.13, "PONSUSDT": 657.0, "PURRUSDT": 11.4, "SKHYNIXUSDT": 0.105, "XPLUSDT": 1897.0}, "spread": 0.10699248294824093, "spread_snapshot": {"MRVLUSDT": 162.27, "MUUSDT": 755.8, "PONSUSDT": 0.1524, "PURRUSDT": 8.748, "SKHYNIXUSDT": 947.68, "XPLUSDT": 0.05276}}
+
+========================================================================================
+Complex #6: ENAUSDT/MARSCOINUSDT/PENGUUSDT <-> QUSDT/CRCLUSDT/BMNRUSDT
+layers=1 | entry_spread=-0.1715684618674067 | current state target=1.0 | leg1_long=True
+saved score=1.422804677488993 | d_max=0.23488409259328313 | cycles=67
+annual_status=partial | annual_days=70.0 | coverage=1.0
+increment_corr min/30d/90d/180d: 0.077 / 0.104 / 0.077 / None
+extreme_single_leg_share=0.987
+max_excursion_z=2.555 | max_recovery_days=15.0
+stability_factor old/new=0.15 / 0.15
+raw_score=3.1285935400241005
+estimated_rank old/new=0.4692890310036151 / 0.4692890310036151
+quality_gate=REJECT: single_leg_spike_share=0.987>0.90
+state.last_spread_snapshot={'ENAUSDT': 0.15121, 'MARSCOINUSDT': 0.04127, 'PENGUUSDT': 0.006201, 'QUSDT': 0.02454, 'CRCLUSDT': 66.04, 'BMNRUSDT': 18.442}
+state.last_add_prices={'ENAUSDT': 0.15136, 'MARSCOINUSDT': 0.04128, 'PENGUUSDT': 0.006203, 'QUSDT': 0.02454, 'CRCLUSDT': 66.05, 'BMNRUSDT': 18.442}
+state.last_grid_level=0
+state.grid_level_index=0
+state.realized_pnl=0.0
+state.fees_paid=0.357000523
+state.close_pending=False
+state.fill_reconciliation_required=False
+layers detail:
+  layer 1: {"add_prices": {"BMNRUSDT": 18.442, "CRCLUSDT": 66.05, "ENAUSDT": 0.15136, "MARSCOINUSDT": 0.04128, "PENGUUSDT": 0.006203, "QUSDT": 0.02454}, "qty": {"BMNRUSDT": 5.4, "CRCLUSDT": 1.51, "ENAUSDT": 660.0, "MARSCOINUSDT": 2420.0, "PENGUUSDT": 16120.0, "QUSDT": 4070.0}, "spread": -0.1715684618674067, "spread_snapshot": {"BMNRUSDT": 18.442, "CRCLUSDT": 66.04, "ENAUSDT": 0.15121, "MARSCOINUSDT": 0.04127, "PENGUUSDT": 0.006201, "QUSDT": 0.02454}}
+
+========================================================================================
+Complex #1: JCTUSDT/ICNTUSDT/ERAUSDT <-> HAEDALUSDT/BMTUSDT/BEATUSDT
+layers=4 | entry_spread=1.1090662097525055 | current state target=4.0 | leg1_long=False
+saved score=17.064641995313643 | d_max=3.684911158428375 | cycles=30
+annual_status=full | annual_days=353.0 | coverage=1.0
+increment_corr min/30d/90d/180d: 0.279 / 0.565 / 0.501 / 0.279
+extreme_single_leg_share=0.954
+max_excursion_z=4.342 | max_recovery_days=26.0
+stability_factor old/new=0.226 / 0.1934
+raw_score=13.02894291441939
+estimated_rank old/new=2.9445410986587826 / 2.51979755964871
+quality_gate=REJECT: single_leg_spike_share=0.954>0.90
+state.last_spread_snapshot={'JCTUSDT': 0.007443, 'ICNTUSDT': 0.2953, 'ERAUSDT': 0.08828, 'HAEDALUSDT': 0.02464, 'BMTUSDT': 0.023304, 'BEATUSDT': 0.0743}
+state.last_add_prices={'JCTUSDT': 0.007407999999999999, 'ICNTUSDT': 0.2953, 'ERAUSDT': 0.08844, 'HAEDALUSDT': 0.02466, 'BMTUSDT': 0.0233, 'BEATUSDT': 0.07429}
+state.last_grid_level=-100.0
+state.grid_level_index=3
+state.realized_pnl=0.0
+state.fees_paid=1.5937929442
+state.close_pending=False
+state.fill_reconciliation_required=False
+layers detail:
+  layer 1: {"add_prices": {"BEATUSDT": 0.07478, "BMTUSDT": 0.023429, "ERAUSDT": 0.07784, "HAEDALUSDT": 0.02449, "ICNTUSDT": 0.2861, "JCTUSDT": 0.005235}, "qty": {"BEATUSDT": 1338.0, "BMTUSDT": 4262.0, "ERAUSDT": 1284.0, "HAEDALUSDT": 4090.0, "ICNTUSDT": 349.0, "JCTUSDT": 19100.0}, "spread": 1.1090662097525055, "spread_snapshot": {"BEATUSDT": 0.07465, "BMTUSDT": 0.023429, "ERAUSDT": 0.07799, "HAEDALUSDT": 0.02449, "ICNTUSDT": 0.2861, "JCTUSDT": 0.005244}}
+  layer 2: {"add_prices": {"BEATUSDT": 0.07535, "BMTUSDT": 0.022826, "ERAUSDT": 0.08312, "HAEDALUSDT": 0.02517, "ICNTUSDT": 0.2961, "JCTUSDT": 0.006047}, "adverse_from_previous_pct": {"BEATUSDT": -0.7354907729339327, "BMTUSDT": 2.573733407315717, "ERAUSDT": 6.269270298047271, "HAEDALUSDT": -2.5724785626786386, "ICNTUSDT": 3.4952813701502805, "JCTUSDT": 15.682903533906392}, "pairs": [["JCTUSDT", "HAEDALUSDT"], ["ERAUSDT", "BMTUSDT"], ["ICNTUSDT", "BEATUSDT"]], "partial_failure": false, "qty": {"BEATUSDT": 1327.0, "BMTUSDT": 4380.0, "ERAUSDT": 1208.0, "HAEDALUSDT": 3980.0, "ICNTUSDT": 337.0, "JCTUSDT": 16500.0}, "spread": 0.07914210985976267, "spread_adverse_contribution_pct": {"BEATUSDT": -0.30363920517972876, "BMTUSDT": 0.8579111357719049, "ERAUSDT": 2.021626704278323, "HAEDALUSDT": -0.8574928542262125, "ICNTUSDT": 1.1650937900500906, "JCTUSDT": 5.161454360539023}, "spread_snapshot": {"BEATUSDT": 0.07535, "BMTUSDT": 0.022818, "ERAUSDT": 0.0832, "HAEDALUSDT": 0.02517, "ICNTUSDT": 0.2964, "JCTUSDT": 0.005984}}
+  layer 3: {"add_prices": {"BEATUSDT": 0.0738, "BMTUSDT": 0.023632, "ERAUSDT": 0.08324, "HAEDALUSDT": 0.02507, "ICNTUSDT": 0.2966, "JCTUSDT": 0.006874}, "adverse_from_previous_pct": {"BEATUSDT": 2.0836098208361005, "BMTUSDT": -3.4916323490756267, "ERAUSDT": -0.15640038498556919, "HAEDALUSDT": 0.43702820818435617, "ICNTUSDT": 0.16886187098953073, "JCTUSDT": 14.337688109806509}, "pairs": [["JCTUSDT", "BMTUSDT"], ["ICNTUSDT", "BEATUSDT"], ["ERAUSDT", "HAEDALUSDT"]], "partial_failure": false, "qty": {"BEATUSDT": 1355.0, "BMTUSDT": 4233.0, "ERAUSDT": 1204.0, "HAEDALUSDT": 3990.0, "ICNTUSDT": 337.0, "JCTUSDT": 14400.0}, "spread": 0.13042686091599265, "spread_adverse_contribution_pct": {"BEATUSDT": 0.6945366069453655, "BMTUSDT": -1.1759721857013499, "ERAUSDT": -0.08413461538461602, "HAEDALUSDT": 0.1456760693947845, "ICNTUSDT": 0.022492127755284013, "JCTUSDT": 5.180481283422463}, "spread_snapshot": {"BEATUSDT": 0.07385, "BMTUSDT": 0.023561, "ERAUSDT": 0.08332, "HAEDALUSDT": 0.02507, "ICNTUSDT": 0.2965, "JCTUSDT": 0.006818}}
+  layer 4: {"add_prices": {"BEATUSDT": 0.07429, "BMTUSDT": 0.0233, "ERAUSDT": 0.08844, "HAEDALUSDT": 0.02466, "ICNTUSDT": 0.2953, "JCTUSDT": 0.007407999999999999}, "adverse_from_previous_pct": {"BEATUSDT": -0.6233062330623333, "BMTUSDT": 1.5275897088693307, "ERAUSDT": 5.910619894281606, "HAEDALUSDT": 1.6354208216992308, "ICNTUSDT": -0.4720161834119882, "JCTUSDT": 7.782950247308698}, "pairs": [["JCTUSDT", "HAEDALUSDT"], ["ERAUSDT", "BEATUSDT"], ["ICNTUSDT", "BMTUSDT"]], "partial_failure": false, "qty": {"BEATUSDT": 1346.0, "BMTUSDT": 4297.0, "ERAUSDT": 1134.0, "HAEDALUSDT": 4050.0, "ICNTUSDT": 338.0, "JCTUSDT": 13400.0}, "spread": 0.19760491804196845, "spread_adverse_contribution_pct": {"BEATUSDT": -0.18505980591288682, "BMTUSDT": 0.41028252903809737, "ERAUSDT": 1.936309809569529, "HAEDALUSDT": 0.5451402738997432, "ICNTUSDT": -0.1461495222034833, "JCTUSDT": 2.88941038427691}, "spread_snapshot": {"BEATUSDT": 0.0743, "BMTUSDT": 0.023304, "ERAUSDT": 0.08828, "HAEDALUSDT": 0.02464, "ICNTUSDT": 0.2953, "JCTUSDT": 0.007443}}
+
+========================================================================================
+Complex #3: GRASSUSDT/SAMSUNGUSDT/ORDERUSDT <-> NBISUSDT/AMDSTOCKUSDT/TSLAUSDT
+layers=1 | entry_spread=-0.08294197502373268 | current state target=1.0 | leg1_long=True
+saved score=1.0413392558073744 | d_max=0.10937776291324619 | cycles=54
+annual_status=partial | annual_days=159.0 | coverage=1.0
+increment_corr min/30d/90d/180d: 0.424 / 0.457 / 0.424 / 0.469
+extreme_single_leg_share=0.954
+max_excursion_z=3.545 | max_recovery_days=16.0
+stability_factor old/new=0.4474 / 0.2679
+raw_score=1.8581828824420183
+estimated_rank old/new=0.8313510216045591 / 0.4978071942062168
+quality_gate=REJECT: single_leg_spike_share=0.954>0.90
+state.last_spread_snapshot={'GRASSUSDT': 0.4722, 'SAMSUNGUSDT': 144.87, 'ORDERUSDT': 0.03032, 'NBISUSDT': 132.98, 'AMDSTOCKUSDT': 514.1, 'TSLAUSDT': 378.38}
+state.last_add_prices={'GRASSUSDT': 0.4718, 'SAMSUNGUSDT': 144.92, 'ORDERUSDT': 0.03033, 'NBISUSDT': 132.86, 'AMDSTOCKUSDT': 513.88, 'TSLAUSDT': 378.27}
+state.last_grid_level=0
+state.grid_level_index=0
+state.realized_pnl=0.0
+state.fees_paid=0.29986437
+state.close_pending=False
+state.fill_reconciliation_required=False
+layers detail:
+  layer 1: {"add_prices": {"AMDSTOCKUSDT": 513.88, "GRASSUSDT": 0.4718, "NBISUSDT": 132.86, "ORDERUSDT": 0.03033, "SAMSUNGUSDT": 144.92, "TSLAUSDT": 378.27}, "qty": {"AMDSTOCKUSDT": 0.19, "GRASSUSDT": 211.0, "NBISUSDT": 0.75, "ORDERUSDT": 3298.0, "SAMSUNGUSDT": 0.69, "TSLAUSDT": 0.26}, "spread": -0.08294197502373268, "spread_snapshot": {"AMDSTOCKUSDT": 514.1, "GRASSUSDT": 0.4722, "NBISUSDT": 132.98, "ORDERUSDT": 0.03032, "SAMSUNGUSDT": 144.87, "TSLAUSDT": 378.38}}
+
+========================================================================================
+Complex #5: STONKUSDT/ESPORTSUSDT/EVAAUSDT <-> PIEVERSEUSDT/CLANKERUSDT/LYNUSDT
+layers=1 | entry_spread=-0.23898981287913645 | current state target=1.0 | leg1_long=True
+saved score=6.475919171756804 | d_max=0.6884365968340094 | cycles=77
+annual_status=insufficient_daily_bars | annual_days=53.0 | coverage=0.0
+increment_corr min/30d/90d/180d: None / None / None / None
+extreme_single_leg_share=None
+max_excursion_z=None | max_recovery_days=None
+stability_factor old/new=None / 0.65
+raw_score=10.604826632228738
+estimated_rank old/new=10.604826632228738 / 6.8931373109486795
+quality_gate=PASS
+state.last_spread_snapshot={'STONKUSDT': 0.0503, 'ESPORTSUSDT': 0.0092, 'EVAAUSDT': 1.084, 'PIEVERSEUSDT': 1.7563, 'CLANKERUSDT': 13.648, 'LYNUSDT': 0.02016}
+state.last_add_prices={'STONKUSDT': 0.0502, 'ESPORTSUSDT': 0.0092, 'EVAAUSDT': 1.084, 'PIEVERSEUSDT': 1.7599, 'CLANKERUSDT': 13.696000000000002, 'LYNUSDT': 0.02015}
+state.last_grid_level=0
+state.grid_level_index=0
+state.realized_pnl=0.0
+state.fees_paid=0.494198485
+state.close_pending=False
+state.fill_reconciliation_required=False
+layers detail:
+  layer 1: {"add_prices": {"CLANKERUSDT": 13.696000000000002, "ESPORTSUSDT": 0.0092, "EVAAUSDT": 1.084, "LYNUSDT": 0.02015, "PIEVERSEUSDT": 1.7599, "STONKUSDT": 0.0502}, "qty": {"CLANKERUSDT": 7.3, "ESPORTSUSDT": 10869.0, "EVAAUSDT": 92.2, "LYNUSDT": 4970.0, "PIEVERSEUSDT": 56.0, "STONKUSDT": 1992.0}, "spread": -0.23898981287913645, "spread_snapshot": {"CLANKERUSDT": 13.648, "ESPORTSUSDT": 0.0092, "EVAAUSDT": 1.084, "LYNUSDT": 0.02016, "PIEVERSEUSDT": 1.7563, "STONKUSDT": 0.0503}}
+
