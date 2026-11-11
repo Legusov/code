@@ -1,0 +1,30 @@
+SPREAD BOT CANDIDATE SELECTION — READ-ONLY DRY RUN
+Generated UTC: 2026-11-11 11:11:48
+Bot: C:\Users\Admin\syntech_spread\syntech_spread_v6_roi_levels.py
+Database (SQLite read-only): C:\Users\Admin\bybit_1m.db
+State (read-only): C:\Users\Admin\state.json
+Bybit access: public market-data GET only; no account/private endpoints or orders
+Target candidates: 12 | concurrent slots: 6 | reserve target: 6
+
+Symbols passing public liquidity/volatility screening: 219
+Active symbols/directions loaded from state.json: 36
+Universe symbols after active-exposure limit: 219
+1m pivot: 219 symbols, 14326 aligned bars
+After pump/dump filtering: 177 symbols
+Cached D data: 177 symbols, 364 dates; missing data will be REVIEW/penalized, not fetched
+Building candidates with bot.build_complexes(...); this may take a few minutes.
+
+CANDIDATES SELECTED: 9 / 12
+ACTIVE CAPACITY: 6 | RESERVE AVAILABLE: 3
+WARNING: fewer than target 12 candidates; reserve is below target. This is an observed shortfall, not a forced fallback.
+01. JCTUSDT/ICNTUSDT/METUSDT <-> ERAUSDT/CYBERUSDT/INJUSDT | status=PASS | days=358.0 coverage=1.0 | corr=0.083 | spike_q75=0.848 dominant=ICNTUSDT (9/18 days) | excursion=3.852z recovery=42.0d | rank=4.575461025774666
+02. MAGMAUSDT/ESPORTSUSDT/BEAMUSDT <-> UAIUSDT/PARTIUSDT/BEATUSDT | status=PASS | days=319.0 coverage=1.0 | corr=0.012 | spike_q75=0.806 dominant=MAGMAUSDT (8/16 days) | excursion=3.913z recovery=25.0d | rank=1.3690204312375311
+03. WDCUSDT/BEAMUSDT/LITEUSDT <-> MEGAUSDT/B2USDT/MERLUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=166.0 coverage=1.0 | corr=0.297 | spike_q75=0.782 dominant=BEAMUSDT (5/9 days) | excursion=3.376z recovery=10.0d | rank=1.3379825553059075
+04. CYBERUSDT/ACTUSDT/FLYUSDT <-> B2USDT/AMDSTOCKUSDT/COHRUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=113.0 coverage=1.0 | corr=0.401 | spike_q75=0.613 dominant=ACTUSDT (2/6 days) | excursion=3.094z recovery=6.0d | rank=0.7955770554645317
+05. SNDKUSDT/MRVLUSDT/AAOIUSDT <-> HANAUSDT/EDGEUSDT/RKLBUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=154.0 coverage=1.0 | corr=0.394 | spike_q75=0.387 dominant=SNDKUSDT (5/8 days) | excursion=3.246z recovery=19.0d | rank=0.7715724595656425
+06. SOXLUSDT/MUUUSDT/KORUUSDT <-> UAIUSDT/BEATUSDT/LITEUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=117.0 coverage=1.0 | corr=0.247 | spike_q75=0.64 dominant=UAIUSDT (4/6 days) | excursion=3.011z recovery=16.0d | rank=0.768274348820915
+07. BLUAIUSDT/PURRUSDT/APRUSDT <-> BEUSDT/TQQQUSDT/ASTSUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=123.0 coverage=1.0 | corr=0.218 | spike_q75=0.914 dominant=APRUSDT (4/7 days) | excursion=2.86z recovery=10.0d | rank=0.38687768719160387
+08. DOSUSDT/QUSDT/PARTIUSDT <-> CBRSUSDT/EWYUSDT/SOXXUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=90.0 coverage=1.0 | corr=-0.038 | spike_q75=0.944 dominant=QUSDT (5/5 days) | excursion=2.784z recovery=16.0d | rank=0.30389652105305065
+09. NIULAIUSDT/SKHYNIXUSDT/DRAMUSDT <-> TQQQUSDT/SAMSUNGUSDT/ORDERUSDT | status=REVIEW_INSUFFICIENT_HISTORY | days=74.0 coverage=1.0 | corr=0.219 | spike_q75=0.964 dominant=NIULAIUSDT (2/4 days) | excursion=2.824z recovery=11.0d | rank=0.136922595257676
+
+SAFETY: no trade session, private/account endpoints, order functions, state writes, or SQLite writes were used.
