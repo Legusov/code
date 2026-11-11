@@ -1,5 +1,5 @@
 ACTIVE COMPLEX QUALITY DIAGNOSTIC
-Generated UTC: 2026-11-11 07:09:32
+Generated UTC: 2026-11-11 07:12:11
 Bot script: C:\Users\Admin\syntech_spread\syntech_spread_v6_roi_levels.py
 State: C:\Users\Admin\state.json
 SQLite DB: C:\Users\Admin\bybit_1m.db
@@ -8,10 +8,10 @@ Read-only: no exchange API calls and no orders sent.
 Ranking scores are diagnostic estimates; only the three new annual checks are compared here.
 
 SUMMARY (risk-ranked)
-1. #1 JCTUSDT/ICNTUSDT/ERAUSDT <-> HAEDALUSDT/BMTUSDT/BEATUSDT | layers=4 | quality=REJECT: persistent_extreme_excursion=4.34z/26d | factor=0.2075 | score old/new=2.8509353545902836/2.617562327776477
-2. #2 ASTSUSDT/NIULAIUSDT/SKHYUSDT <-> HIMSUSDT/LSKUSDT/2ZUSDT | layers=1 | quality=REVIEW_INSUFFICIENT_HISTORY | factor=0.15 | score old/new=0.3090102787883244/0.3090102787883244
-3. #4 SKHYNIXUSDT/MUUSDT/MRVLUSDT <-> PONSUSDT/XPLUSDT/PURRUSDT | layers=1 | quality=REVIEW_INSUFFICIENT_HISTORY | factor=0.1996 | score old/new=0.37419138993288525/0.37419138993288525
-4. #3 GRASSUSDT/SAMSUNGUSDT/ORDERUSDT <-> NBISUSDT/AMDSTOCKUSDT/TSLAUSDT | layers=1 | quality=REVIEW_INSUFFICIENT_HISTORY | factor=0.4208 | score old/new=0.8186870979627798/0.7700123621429096
+1. #1 JCTUSDT/ICNTUSDT/ERAUSDT <-> HAEDALUSDT/BMTUSDT/BEATUSDT | layers=4 | quality=REJECT: persistent_extreme_excursion=4.34z/26d | factor=0.2075 | score old/new=2.866451203298371/2.6318080738248315
+2. #2 ASTSUSDT/NIULAIUSDT/SKHYUSDT <-> HIMSUSDT/LSKUSDT/2ZUSDT | layers=1 | quality=REVIEW_INSUFFICIENT_HISTORY | factor=0.15 | score old/new=0.30866298652623464/0.30866298652623464
+3. #4 SKHYNIXUSDT/MUUSDT/MRVLUSDT <-> PONSUSDT/XPLUSDT/PURRUSDT | layers=1 | quality=REVIEW_INSUFFICIENT_HISTORY | factor=0.1996 | score old/new=0.37135842284701415/0.37135842284701415
+4. #3 GRASSUSDT/SAMSUNGUSDT/ORDERUSDT <-> NBISUSDT/AMDSTOCKUSDT/TSLAUSDT | layers=1 | quality=REVIEW_INSUFFICIENT_HISTORY | factor=0.4208 | score old/new=0.8322535748163364/0.7827722491790665
 
 DETAILS
 ========================================================================================
@@ -20,11 +20,11 @@ layers=4 | entry_spread=1.1090662097525055 | current state target=4.0 | leg1_lon
 saved score=17.064641995313643 | d_max=3.684911158428375 | cycles=30
 annual_status=full | annual_days=353.0 | coverage=1.0
 increment_corr min/30d/90d/180d: 0.279 / 0.565 / 0.501 / 0.279
-extreme_single_leg_share_q75=0.912 | max=None | dominant_symbol=None | dominant_days=0/0 (None)
+extreme_single_leg_share_q75=0.912 | max=0.954 | dominant_symbol=BEATUSDT | dominant_days=16/18 (0.889)
 max_excursion_z=4.342 | max_recovery_days=26.0
 stability_factor old/new=0.226 / 0.2075
-raw_score=12.614758206151697
-estimated_rank old/new=2.8509353545902836 / 2.617562327776477
+raw_score=12.683412403975092
+estimated_rank old/new=2.866451203298371 / 2.6318080738248315
 quality_gate=REJECT: persistent_extreme_excursion=4.34z/26d
 state.last_spread_snapshot={'JCTUSDT': 0.007443, 'ICNTUSDT': 0.2953, 'ERAUSDT': 0.08828, 'HAEDALUSDT': 0.02464, 'BMTUSDT': 0.023304, 'BEATUSDT': 0.0743}
 state.last_add_prices={'JCTUSDT': 0.007407999999999999, 'ICNTUSDT': 0.2953, 'ERAUSDT': 0.08844, 'HAEDALUSDT': 0.02466, 'BMTUSDT': 0.0233, 'BEATUSDT': 0.07429}
@@ -46,11 +46,11 @@ layers=1 | entry_spread=0.10511960327411607 | current state target=1.0 | leg1_lo
 saved score=1.718366936314474 | d_max=0.11807513786742785 | cycles=66
 annual_status=partial | annual_days=73.0 | coverage=1.0
 increment_corr min/30d/90d/180d: -0.089 / 0.274 / -0.089 / None
-extreme_single_leg_share_q75=0.923 | max=None | dominant_symbol=None | dominant_days=0/0 (None)
+extreme_single_leg_share_q75=0.923 | max=0.945 | dominant_symbol=LSKUSDT | dominant_days=4/4 (1.0)
 max_excursion_z=2.745 | max_recovery_days=3.0
 stability_factor old/new=0.15 / 0.15
-raw_score=2.0600685252554958
-estimated_rank old/new=0.3090102787883244 / 0.3090102787883244
+raw_score=2.057753243508231
+estimated_rank old/new=0.30866298652623464 / 0.30866298652623464
 quality_gate=REVIEW_INSUFFICIENT_HISTORY
 state.last_spread_snapshot={'ASTSUSDT': 33.6, 'NIULAIUSDT': 0.05668, 'SKHYUSDT': 129.61, 'HIMSUSDT': 18.85, 'LSKUSDT': 0.16423, '2ZUSDT': 0.01937}
 state.last_add_prices={'ASTSUSDT': 33.55, 'NIULAIUSDT': 0.05656, 'SKHYUSDT': 129.49, 'HIMSUSDT': 18.95, 'LSKUSDT': 0.16405, '2ZUSDT': 0.01934}
@@ -69,11 +69,11 @@ layers=1 | entry_spread=0.10699248294824093 | current state target=1.0 | leg1_lo
 saved score=1.3557455686541549 | d_max=0.10510753453001309 | cycles=85
 annual_status=partial | annual_days=71.0 | coverage=1.0
 increment_corr min/30d/90d/180d: 0.352 / 0.601 / 0.352 / None
-extreme_single_leg_share_q75=0.723 | max=None | dominant_symbol=None | dominant_days=0/0 (None)
+extreme_single_leg_share_q75=0.723 | max=0.955 | dominant_symbol=PONSUSDT | dominant_days=4/4 (1.0)
 max_excursion_z=2.144 | max_recovery_days=19.0
 stability_factor old/new=0.1996 / 0.1996
-raw_score=1.8747063623892046
-estimated_rank old/new=0.37419138993288525 / 0.37419138993288525
+raw_score=1.8605131405161028
+estimated_rank old/new=0.37135842284701415 / 0.37135842284701415
 quality_gate=REVIEW_INSUFFICIENT_HISTORY
 state.last_spread_snapshot={'SKHYNIXUSDT': 947.68, 'MUUSDT': 755.8, 'MRVLUSDT': 162.27, 'PONSUSDT': 0.1524, 'XPLUSDT': 0.05276, 'PURRUSDT': 8.748}
 state.last_add_prices={'SKHYNIXUSDT': 948.5, 'MUUSDT': 756.36, 'MRVLUSDT': 162.3, 'PONSUSDT': 0.1524, 'XPLUSDT': 0.05275, 'PURRUSDT': 8.748}
@@ -92,11 +92,11 @@ layers=1 | entry_spread=-0.08294197502373268 | current state target=1.0 | leg1_l
 saved score=1.0413392558073744 | d_max=0.10937776291324619 | cycles=54
 annual_status=partial | annual_days=159.0 | coverage=1.0
 increment_corr min/30d/90d/180d: 0.424 / 0.457 / 0.424 / 0.469
-extreme_single_leg_share_q75=0.855 | max=None | dominant_symbol=None | dominant_days=0/0 (None)
+extreme_single_leg_share_q75=0.855 | max=0.954 | dominant_symbol=GRASSUSDT | dominant_days=5/8 (0.625)
 max_excursion_z=3.545 | max_recovery_days=16.0
 stability_factor old/new=0.4474 / 0.4208
-raw_score=1.829877286461287
-estimated_rank old/new=0.8186870979627798 / 0.7700123621429096
+raw_score=1.8602002119274395
+estimated_rank old/new=0.8322535748163364 / 0.7827722491790665
 quality_gate=REVIEW_INSUFFICIENT_HISTORY
 state.last_spread_snapshot={'GRASSUSDT': 0.4722, 'SAMSUNGUSDT': 144.87, 'ORDERUSDT': 0.03032, 'NBISUSDT': 132.98, 'AMDSTOCKUSDT': 514.1, 'TSLAUSDT': 378.38}
 state.last_add_prices={'GRASSUSDT': 0.4718, 'SAMSUNGUSDT': 144.92, 'ORDERUSDT': 0.03033, 'NBISUSDT': 132.86, 'AMDSTOCKUSDT': 513.88, 'TSLAUSDT': 378.27}
